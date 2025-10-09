@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cladtek AI Assistant</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #1C9AD6;
+            --primary-dark: #157CAD;
+            --primary-light: #45B0E5;
+            --secondary-color: #0D5E84;
+            --accent-color: #FFA726;
+            --text-dark: #2C3E50;
+            --text-light: #6C757D;
+            --bg-light: #F8F9FA;
+            --white: #FFFFFF;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #1C9AD6 0%, #0D5E84 100%);
+            padding: 20px;
+            position: relative;
+        }
+
+        body::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-image:
+                radial-gradient(circle at 20% 50%, rgba(255, 255, 255, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 80% 80%, rgba(255, 255, 255, 0.1) 0%, transparent 50%);
+            pointer-events: none;
+        }
+
+        #chat-container {
+            width: 100%;
+            max-width: 800px;
+            height: 85vh;
+            border-radius: 20px;
+            display: flex;
+            flex-direction: column;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        #chat-header {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            color: white;
+            padding: 20px 25px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        #chat-header::after {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -50px;
+            width: 200px;
+            height: 200px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 50%;
+        }
+
+        #chat-header .logo {
+            width: 50px;
+            height: 50px;
+            background: var(--white);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            font-weight: 800;
+            color: var(--primary-color);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            position: relative;
+            z-index: 1;
+        }
+
+        #chat-header .title {
+            flex: 1;
+            position: relative;
+            z-index: 1;
+        }
+
+        #chat-header h1 {
+            font-size: 22px;
+            font-weight: 700;
+            margin-bottom: 3px;
+            letter-spacing: -0.5px;
+        }
+
+        #chat-header h1 .brand {
+            font-weight: 800;
+            color: var(--accent-color);
+        }
+
+        #chat-header p {
+            font-size: 12px;
+            opacity: 0.95;
+            font-weight: 500;
+        }
+
+        .status-indicator {
+            width: 10px;
+            height: 10px;
+            background: #4ade80;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        #chat-history {
+            flex: 1;
+            padding: 25px;
+            overflow-y: auto;
+            background: #f8fafc;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        #chat-history::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        #chat-history::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        #chat-history::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 10px;
+        }
+
+        .message {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.user {
+            flex-direction: row-reverse;
+        }
+
+        .message .avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            flex-shrink: 0;
+        }
+
+        .message.user .avatar {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+            box-shadow: 0 2px 8px rgba(28, 154, 214, 0.3);
+        }
+
+        .message.bot .avatar {
+            background: linear-gradient(135deg, var(--accent-color) 0%, #FF8A50 100%);
+            box-shadow: 0 2px 8px rgba(255, 167, 38, 0.3);
+        }
+
+        .message .content {
+            max-width: 70%;
+            padding: 12px 18px;
+            border-radius: 18px;
+            font-size: 14px;
+            line-height: 1.6;
+            word-wrap: break-word;
+            white-space: pre-wrap;
+        }
+
+        .message.user .content {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+            color: white;
+            border-bottom-right-radius: 4px;
+            box-shadow: 0 2px 8px rgba(28, 154, 214, 0.2);
+        }
+
+        .message.bot .content {
+            background: white;
+            color: #1e293b;
+            border-bottom-left-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        }
+
+        .message .content strong {
+            font-weight: 700;
+            color: var(--primary-color);
+        }
+
+        .message.user .content strong {
+            color: var(--accent-color);
+        }
+
+        .message .content em {
+            font-style: italic;
+        }
+
+        .message .content code {
+            background: #f1f5f9;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            color: #e91e63;
+        }
+
+        .message.user .content code {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+        }
+
+        .typing-indicator {
+            display: flex;
+            gap: 4px;
+            padding: 12px 18px;
+        }
+
+        .typing-indicator span {
+            width: 8px;
+            height: 8px;
+            background: #94a3b8;
+            border-radius: 50%;
+            animation: typing 1.4s infinite;
+        }
+
+        .typing-indicator span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-indicator span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes typing {
+            0%, 60%, 100% {
+                transform: translateY(0);
+            }
+            30% {
+                transform: translateY(-10px);
+            }
+        }
+
+        #chat-form {
+            display: flex;
+            padding: 20px 25px;
+            gap: 12px;
+            background: white;
+            border-top: 1px solid #e2e8f0;
+        }
+
+        #chat-input {
+            flex: 1;
+            padding: 14px 18px;
+            border: 2px solid #e2e8f0;
+            border-radius: 12px;
+            font-size: 14px;
+            font-family: 'Inter', sans-serif;
+            outline: none;
+            transition: all 0.3s ease;
+        }
+
+        #chat-input:focus {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(28, 154, 214, 0.1);
+        }
+
+        #send-button {
+            padding: 14px 28px;
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 4px 12px rgba(28, 154, 214, 0.3);
+        }
+
+        #send-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(28, 154, 214, 0.5);
+            background: linear-gradient(135deg, var(--primary-light) 0%, var(--primary-color) 100%);
+        }
+
+        #send-button:active {
+            transform: translateY(0);
+        }
+
+        #send-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .welcome-message {
+            text-align: center;
+            padding: 40px 20px;
+            color: #64748b;
+        }
+
+        .welcome-message h2 {
+            font-size: 24px;
+            color: #1e293b;
+            margin-bottom: 10px;
+        }
+
+        .welcome-message p {
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+
+        .quick-questions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 20px;
+        }
+
+        .quick-question {
+            padding: 8px 16px;
+            background: white;
+            border: 2px solid var(--primary-color);
+            border-radius: 20px;
+            font-size: 13px;
+            color: var(--primary-color);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: 500;
+        }
+
+        .quick-question:hover {
+            background: var(--primary-color);
+            color: white;
+            border-color: var(--primary-color);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(28, 154, 214, 0.3);
+        }
+
+        .cladtek-footer {
+            text-align: center;
+            padding: 15px;
+            font-size: 11px;
+            color: var(--text-light);
+            border-top: 1px solid #e2e8f0;
+            background: var(--bg-light);
+        }
+
+        .cladtek-footer a {
+            color: var(--primary-color);
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .cladtek-footer a:hover {
+            text-decoration: underline;
+        }
+
+        .powered-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 500;
+            backdrop-filter: blur(10px);
+        }
+
+        .tech-icon {
+            width: 14px;
+            height: 14px;
+            background: white;
+            border-radius: 3px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 8px;
+        }
+
+        @media (max-width: 768px) {
+            #chat-container {
+                height: 90vh;
+                border-radius: 0;
+            }
+
+            .message .content {
+                max-width: 85%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="chat-container">
+        <div id="chat-header">
+            <div class="logo">CT</div>
+            <div class="title">
+                <h1><span class="brand">Cladtek</span> AI Assistant</h1>
+                <p>
+                    <span class="powered-badge">
+                        <span class="tech-icon">✨</span>
+                        <span>Powered by Gemini 2.5 Flash</span>
+                    </span>
+                </p>
+            </div>
+            <div class="status-indicator"></div>
+        </div>
+
+        <div id="chat-history">
+            <div class="welcome-message">
+                <h2>👋 Selamat Datang di Cladtek AI</h2>
+                <p>Saya adalah AI assistant dari <strong style="color: #1C9AD6;">Cladtek</strong> yang siap membantu menjawab pertanyaan Anda</p>
+                <div class="quick-questions">
+                    <div class="quick-question" onclick="askQuestion('Apa itu AI?')">💡 Apa itu AI?</div>
+                    <div class="quick-question" onclick="askQuestion('Jelaskan tentang machine learning')">🤖 Machine Learning</div>
+                    <div class="quick-question" onclick="askQuestion('Cara belajar programming?')">💻 Belajar Programming</div>
+                    <div class="quick-question" onclick="askQuestion('Apa itu Cladtek?')">🏢 Tentang Cladtek</div>
+                </div>
+            </div>
+        </div>
+
+        <form id="chat-form">
+            <input type="text" id="chat-input" placeholder="Ketik pertanyaan Anda..." autocomplete="off" required>
+            <button id="send-button" type="submit">
+                <span>Kirim</span>
+                <span>🚀</span>
+            </button>
+        </form>
+
+        <div class="cladtek-footer">
+            © 2025 <a href="#" target="_blank">Cladtek</a> - Innovative Technology Solutions | AI-Powered Assistant
+        </div>
+    </div>
+
+    <script>
+        const chatHistory = document.getElementById('chat-history');
+        const chatForm = document.getElementById('chat-form');
+        const chatInput = document.getElementById('chat-input');
+        const sendButton = document.getElementById('send-button');
+        let isTyping = false;
+
+        // Remove welcome message on first interaction
+        let isFirstMessage = true;
+
+        chatForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const userMessage = chatInput.value.trim();
+            if (!userMessage || isTyping) return;
+
+            // Remove welcome message if first interaction
+            if (isFirstMessage) {
+                const welcomeMsg = chatHistory.querySelector('.welcome-message');
+                if (welcomeMsg) welcomeMsg.remove();
+                isFirstMessage = false;
+            }
+
+            appendMessage('user', userMessage);
+            chatInput.value = '';
+            sendButton.disabled = true;
+            isTyping = true;
+
+            // Show typing indicator
+            const typingIndicator = showTypingIndicator();
+
+            try {
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question: userMessage })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+
+                const data = await response.json();
+
+                // Remove typing indicator
+                typingIndicator.remove();
+
+                // Append message with typing effect
+                await appendMessageWithTyping('bot', data.answer);
+
+            } catch (error) {
+                console.error('Error:', error);
+                typingIndicator.remove();
+                appendMessage('bot', 'Maaf, terjadi kesalahan saat memproses permintaan Anda.');
+            } finally {
+                sendButton.disabled = false;
+                isTyping = false;
+                chatInput.focus();
+            }
+        });
+
+        function askQuestion(question) {
+            chatInput.value = question;
+            chatForm.dispatchEvent(new Event('submit'));
+        }
+
+        function parseMarkdown(text) {
+            // Convert markdown to HTML
+            let html = text
+                // Bold: **text** or __text__
+                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                .replace(/__(.+?)__/g, '<strong>$1</strong>')
+                // Italic: *text* or _text_
+                .replace(/\*(.+?)\*/g, '<em>$1</em>')
+                .replace(/_(.+?)_/g, '<em>$1</em>')
+                // Code: `code`
+                .replace(/`(.+?)`/g, '<code>$1</code>')
+                // Line breaks
+                .replace(/\n/g, '<br>');
+
+            return html;
+        }
+
+        function appendMessage(sender, message) {
+            const messageElement = document.createElement('div');
+            messageElement.classList.add('message', sender);
+
+            const avatar = document.createElement('div');
+            avatar.classList.add('avatar');
+            avatar.textContent = sender === 'user' ? '👤' : '🤖';
+
+            const contentElement = document.createElement('div');
+            contentElement.classList.add('content');
+            contentElement.innerHTML = parseMarkdown(message);
+
+            messageElement.appendChild(avatar);
+            messageElement.appendChild(contentElement);
+            chatHistory.appendChild(messageElement);
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+        }
+
+        async function appendMessageWithTyping(sender, message) {
+            const messageElement = document.createElement('div');
+            messageElement.classList.add('message', sender);
+
+            const avatar = document.createElement('div');
+            avatar.classList.add('avatar');
+            avatar.textContent = sender === 'user' ? '👤' : '🤖';
+
+            const contentElement = document.createElement('div');
+            contentElement.classList.add('content');
+
+            messageElement.appendChild(avatar);
+            messageElement.appendChild(contentElement);
+            chatHistory.appendChild(messageElement);
+
+            // Typing effect
+            let index = 0;
+            const speed = 10; // milliseconds per character
+            let displayText = '';
+
+            return new Promise((resolve) => {
+                const typeInterval = setInterval(() => {
+                    if (index < message.length) {
+                        displayText += message.charAt(index);
+                        // Update with parsed markdown
+                        contentElement.innerHTML = parseMarkdown(displayText);
+                        index++;
+                        chatHistory.scrollTop = chatHistory.scrollHeight;
+                    } else {
+                        clearInterval(typeInterval);
+                        resolve();
+                    }
+                }, speed);
+            });
+        }
+
+        function showTypingIndicator() {
+            const messageElement = document.createElement('div');
+            messageElement.classList.add('message', 'bot');
+
+            const avatar = document.createElement('div');
+            avatar.classList.add('avatar');
+            avatar.textContent = '🤖';
+
+            const contentElement = document.createElement('div');
+            contentElement.classList.add('content');
+
+            const typingDiv = document.createElement('div');
+            typingDiv.classList.add('typing-indicator');
+            typingDiv.innerHTML = '<span></span><span></span><span></span>';
+
+            contentElement.appendChild(typingDiv);
+            messageElement.appendChild(avatar);
+            messageElement.appendChild(contentElement);
+            chatHistory.appendChild(messageElement);
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+
+            return messageElement;
+        }
+
+        // Focus on input when page loads
+        window.addEventListener('load', () => {
+            chatInput.focus();
+        });
+    </script>
+</body>
+</html>
