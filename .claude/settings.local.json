@@ -4,7 +4,10 @@
       "Bash(npm start)",
       "Bash(npm install:*)",
       "Bash(curl -s \"https://generativelanguage.googleapis.com/v1beta/models?key=AIzaSyCDwbZuYxaZBbIX-_XI3RdulXy_nITkISY\")",
-      "Bash(curl -s -X POST http://localhost:3000/api/chat -H \"Content-Type: application/json\" -d '{\"\"\"\"question\"\"\"\":\"\"\"\"Apa itu AI?\"\"\"\"}')"
+      "Bash(curl -s -X POST http://localhost:3000/api/chat -H \"Content-Type: application/json\" -d '{\"\"\"\"question\"\"\"\":\"\"\"\"Apa itu AI?\"\"\"\"}')",
+      "Bash(curl -s -X POST http://localhost:3000/api/chat -H \"Content-Type: application/json\" -d '{\"\"question\"\":\"\"Apa itu AI?\"\"}')",
+      "Bash(curl -s -X POST http://localhost:3000/api/chat -H \"Content-Type: application/json\" -d '{\"\"question\"\":\"\"Berapa total jumlah karyawan?\"\"}')",
+      "Bash(curl -s -X POST http://localhost:3000/api/chat -H \"Content-Type: application/json\" -d '{\"\"question\"\":\"\"Tampilkan karyawan per department\"\"}')"
     ],
     "deny": [],
     "ask": []
