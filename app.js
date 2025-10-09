@@ -4,7 +4,7 @@ import express from "express";
 import path from "path";
 import { fileURLToPath } from 'url';
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { connectDB, queryDB } from "./db.js";
+import { connectDB, queryDB, getTableSchema, getSampleData } from "./db.js";
 
 dotenv.config();
 
@@ -27,11 +27,82 @@ const genAI = new GoogleGenerativeAI(API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
 // Connect ke database saat startup (dengan graceful error handling)
+let employeesSchema = null;
+let employeesSample = null;
+
 try {
   await connectDB();
+
+  // Load schema dan sample data untuk employees saat startup
+  console.log("📊 Loading employees table schema...");
+  employeesSchema = await getTableSchema('employees');
+  employeesSample = await getSampleData('employees', 2);
+
+  if (employeesSchema && employeesSchema.length > 0) {
+    console.log(`✅ Schema loaded: ${employeesSchema.length} columns`);
+  }
 } catch (error) {
   console.log("⚠️ Server tetap berjalan tanpa koneksi database");
   console.log("⚠️ Mode: AI Only (tanpa database)");
+}
+
+// Fungsi untuk generate SQL query menggunakan AI (Text-to-SQL)
+async function generateSQLFromQuestion(question) {
+  try {
+    if (!employeesSchema || employeesSchema.length === 0) {
+      return null;
+    }
+
+    // Buat deskripsi schema yang mudah dipahami AI
+    const schemaDescription = employeesSchema.map(col => {
+      return `- ${col.columnName} (${col.dataType}${col.maxLength ? `(${col.maxLength})` : ''}): ${col.isNullable === 'YES' ? 'nullable' : 'required'}`;
+    }).join('\n');
+
+    // Sample data untuk konteks
+    const sampleDataStr = employeesSample ? JSON.stringify(employeesSample, null, 2) : '';
+
+    // Prompt untuk AI
+    const sqlPrompt = `
+You are an expert SQL query generator for SQL Server database.
+
+TABLE SCHEMA:
+Table name: employees
+Columns:
+${schemaDescription}
+
+SAMPLE DATA (for context):
+${sampleDataStr}
+
+USER QUESTION: "${question}"
+
+INSTRUCTIONS:
+1. Generate ONLY a valid SQL Server query based on the question
+2. Use TOP instead of LIMIT for SQL Server
+3. Return ONLY the SQL query, no explanations
+4. Use appropriate aggregations (COUNT, SUM, AVG, etc.) when needed
+5. Use GROUP BY when showing breakdown by categories
+6. Handle NULL values appropriately
+7. For text searches, use LIKE with wildcards
+8. Maximum 100 rows for safety (TOP 100)
+
+IMPORTANT: Return ONLY the SQL query, nothing else. No markdown, no code blocks, just pure SQL.
+
+SQL Query:`;
+
+    const result = await model.generateContent(sqlPrompt);
+    const response = await result.response;
+    let sqlQuery = response.text().trim();
+
+    // Clean up response (hapus markdown code blocks jika ada)
+    sqlQuery = sqlQuery.replace(/```sql\n?/gi, '').replace(/```\n?/g, '').trim();
+
+    console.log("🤖 AI Generated SQL:", sqlQuery);
+
+    return sqlQuery;
+  } catch (error) {
+    console.error("❌ Error generating SQL:", error.message);
+    return null;
+  }
 }
 
 // Fungsi untuk mencari data dari database berdasarkan pertanyaan
@@ -40,8 +111,43 @@ async function searchDatabase(question) {
     const lowerQuestion = question.toLowerCase();
     let dbResults = [];
 
-    // Deteksi keywords untuk query yang tepat
-    // Contoh: cari tabel berdasarkan keyword
+    // PRIORITAS 1: Coba AI-Generated SQL Query (Text-to-SQL)
+    // Ini akan bekerja untuk pertanyaan apapun tentang employees
+    if (lowerQuestion.includes('karyawan') || lowerQuestion.includes('employee') ||
+        lowerQuestion.includes('pegawai') || lowerQuestion.includes('staff')) {
+
+      console.log("🧠 Menggunakan AI untuk generate SQL query...");
+
+      const aiGeneratedSQL = await generateSQLFromQuestion(question);
+
+      if (aiGeneratedSQL) {
+        try {
+          const aiResults = await queryDB(aiGeneratedSQL);
+
+          if (aiResults && aiResults.length > 0) {
+            dbResults.push({
+              type: 'ai_generated_query',
+              data: aiResults,
+              description: 'Data karyawan dari AI-generated query',
+              sql_query: aiGeneratedSQL,
+              query_method: 'AI Text-to-SQL'
+            });
+
+            console.log(`✅ AI query berhasil: ${aiResults.length} rows`);
+
+            // Return langsung jika AI query berhasil
+            return dbResults;
+          }
+        } catch (sqlError) {
+          console.log("⚠️ AI-generated SQL error, fallback ke hardcoded queries");
+          console.log("SQL:", aiGeneratedSQL);
+          console.log("Error:", sqlError.message);
+          // Lanjut ke hardcoded queries sebagai fallback
+        }
+      }
+    }
+
+    // FALLBACK: Hardcoded queries (jika AI query gagal atau tidak applicable)
 
     // CONTOH 1: Jika tanya tentang "data" atau "informasi"
     if (lowerQuestion.includes('data') || lowerQuestion.includes('informasi') ||
@@ -60,7 +166,8 @@ async function searchDatabase(question) {
         dbResults.push({
           type: 'tables_available',
           data: tables.map(t => t.TABLE_NAME),
-          description: 'Daftar tabel yang tersedia di database'
+          description: 'Daftar tabel yang tersedia di database',
+          query_method: 'Hardcoded'
         });
       }
     }

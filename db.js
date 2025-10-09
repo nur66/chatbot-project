@@ -61,6 +61,41 @@ export async function queryDB(sqlQuery, params = {}) {
   }
 }
 
+// Fungsi untuk mendapatkan schema tabel (struktur kolom)
+export async function getTableSchema(tableName) {
+  try {
+    const schemaQuery = `
+      SELECT
+        COLUMN_NAME as columnName,
+        DATA_TYPE as dataType,
+        CHARACTER_MAXIMUM_LENGTH as maxLength,
+        IS_NULLABLE as isNullable,
+        COLUMN_DEFAULT as defaultValue
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_NAME = '${tableName}'
+      ORDER BY ORDINAL_POSITION
+    `;
+
+    const schema = await queryDB(schemaQuery);
+    return schema;
+  } catch (error) {
+    console.error(`❌ Error getting schema for ${tableName}:`, error.message);
+    return [];
+  }
+}
+
+// Fungsi untuk mendapatkan sample data dari tabel
+export async function getSampleData(tableName, limit = 3) {
+  try {
+    const sampleQuery = `SELECT TOP ${limit} * FROM ${tableName}`;
+    const sample = await queryDB(sampleQuery);
+    return sample;
+  } catch (error) {
+    console.error(`❌ Error getting sample from ${tableName}:`, error.message);
+    return [];
+  }
+}
+
 // Fungsi untuk close connection
 export async function closeDB() {
   try {
