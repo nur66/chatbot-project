@@ -368,96 +368,96 @@ async function searchDatabase(question) {
       }
     }
 
-    // CONTOH 4: Query employees (karyawan)
-    if (lowerQuestion.includes('karyawan') || lowerQuestion.includes('employee') ||
-        lowerQuestion.includes('pegawai') || lowerQuestion.includes('staff')) {
-      try {
-        // Query dasar untuk semua karyawan
-        let employeeQuery = `SELECT TOP 50 * FROM employees ORDER BY last_updated DESC`;
+    // CONTOH 4: Query employees (karyawan) - DISABLED
+    // if (lowerQuestion.includes('karyawan') || lowerQuestion.includes('employee') ||
+    //     lowerQuestion.includes('pegawai') || lowerQuestion.includes('staff')) {
+    //   try {
+    //     // Query dasar untuk semua karyawan
+    //     let employeeQuery = `SELECT TOP 50 * FROM employees ORDER BY last_updated DESC`;
 
-        // Query spesifik berdasarkan keyword
-        if (lowerQuestion.includes('department') || lowerQuestion.includes('departemen')) {
-          employeeQuery = `
-            SELECT department, COUNT(*) as jumlah
-            FROM employees
-            WHERE department IS NOT NULL
-            GROUP BY department
-            ORDER BY jumlah DESC
-          `;
-        } else if (lowerQuestion.includes('status')) {
-          employeeQuery = `
-            SELECT employmentStatus, COUNT(*) as jumlah
-            FROM employees
-            WHERE employmentStatus IS NOT NULL
-            GROUP BY employmentStatus
-          `;
-        } else if (lowerQuestion.includes('gender') || lowerQuestion.includes('jenis kelamin')) {
-          employeeQuery = `
-            SELECT gender, COUNT(*) as jumlah
-            FROM employees
-            WHERE gender IS NOT NULL
-            GROUP BY gender
-          `;
-        } else if (lowerQuestion.includes('total') || lowerQuestion.includes('jumlah')) {
-          employeeQuery = `
-            SELECT
-              COUNT(*) as total_karyawan,
-              COUNT(CASE WHEN gender = 'Male' THEN 1 END) as pria,
-              COUNT(CASE WHEN gender = 'Female' THEN 1 END) as wanita,
-              COUNT(DISTINCT department) as total_department,
-              COUNT(DISTINCT [section]) as total_section
-            FROM employees
-          `;
-        }
+    //     // Query spesifik berdasarkan keyword
+    //     if (lowerQuestion.includes('department') || lowerQuestion.includes('departemen')) {
+    //       employeeQuery = `
+    //         SELECT department, COUNT(*) as jumlah
+    //         FROM employees
+    //         WHERE department IS NOT NULL
+    //         GROUP BY department
+    //         ORDER BY jumlah DESC
+    //       `;
+    //     } else if (lowerQuestion.includes('status')) {
+    //       employeeQuery = `
+    //         SELECT employmentStatus, COUNT(*) as jumlah
+    //         FROM employees
+    //         WHERE employmentStatus IS NOT NULL
+    //         GROUP BY employmentStatus
+    //       `;
+    //     } else if (lowerQuestion.includes('gender') || lowerQuestion.includes('jenis kelamin')) {
+    //       employeeQuery = `
+    //         SELECT gender, COUNT(*) as jumlah
+    //         FROM employees
+    //         WHERE gender IS NOT NULL
+    //         GROUP BY gender
+    //       `;
+    //     } else if (lowerQuestion.includes('total') || lowerQuestion.includes('jumlah')) {
+    //       employeeQuery = `
+    //         SELECT
+    //           COUNT(*) as total_karyawan,
+    //           COUNT(CASE WHEN gender = 'Male' THEN 1 END) as pria,
+    //           COUNT(CASE WHEN gender = 'Female' THEN 1 END) as wanita,
+    //           COUNT(DISTINCT department) as total_department,
+    //           COUNT(DISTINCT [section]) as total_section
+    //         FROM employees
+    //       `;
+    //     }
 
-        const employeeData = await queryDB(employeeQuery);
-        if (employeeData && employeeData.length > 0) {
-          dbResults.push({
-            type: 'employee_data',
-            data: employeeData,
-            description: 'Data karyawan dari database Cladtek',
-            query_type: lowerQuestion.includes('department') ? 'department' :
-                       lowerQuestion.includes('status') ? 'status' :
-                       lowerQuestion.includes('gender') ? 'gender' :
-                       lowerQuestion.includes('total') ? 'summary' : 'list'
-          });
-        }
-      } catch (err) {
-        console.log("⚠️ Error query tabel employees:", err.message);
-      }
-    }
+    //     const employeeData = await queryDB(employeeQuery);
+    //     if (employeeData && employeeData.length > 0) {
+    //       dbResults.push({
+    //         type: 'employee_data',
+    //         data: employeeData,
+    //         description: 'Data karyawan dari database Cladtek',
+    //         query_type: lowerQuestion.includes('department') ? 'department' :
+    //                    lowerQuestion.includes('status') ? 'status' :
+    //                    lowerQuestion.includes('gender') ? 'gender' :
+    //                    lowerQuestion.includes('total') ? 'summary' : 'list'
+    //       });
+    //     }
+    //   } catch (err) {
+    //     console.log("⚠️ Error query tabel employees:", err.message);
+    //   }
+    // }
 
-    // CONTOH 5: Query spesifik by name atau badge ID
-    if (lowerQuestion.includes('cari') || lowerQuestion.includes('search') ||
-        lowerQuestion.includes('nama') || lowerQuestion.includes('badge')) {
-      try {
-        // Extract nama atau badge dari pertanyaan
-        // Contoh: "Cari karyawan nama John" atau "Badge 12345"
-        const words = lowerQuestion.split(' ');
-        const nameOrBadge = words[words.length - 1]; // ambil kata terakhir sebagai keyword
+    // CONTOH 5: Query spesifik by name atau badge ID - DISABLED
+    // if (lowerQuestion.includes('cari') || lowerQuestion.includes('search') ||
+    //     lowerQuestion.includes('nama') || lowerQuestion.includes('badge')) {
+    //   try {
+    //     // Extract nama atau badge dari pertanyaan
+    //     // Contoh: "Cari karyawan nama John" atau "Badge 12345"
+    //     const words = lowerQuestion.split(' ');
+    //     const nameOrBadge = words[words.length - 1]; // ambil kata terakhir sebagai keyword
 
-        if (nameOrBadge.length > 2) { // minimal 3 karakter
-          const searchQuery = `
-            SELECT TOP 10 *
-            FROM employees
-            WHERE name LIKE '%${nameOrBadge}%'
-               OR badgeId LIKE '%${nameOrBadge}%'
-               OR email LIKE '%${nameOrBadge}%'
-            ORDER BY last_updated DESC
-          `;
-          const searchData = await queryDB(searchQuery);
-          if (searchData && searchData.length > 0) {
-            dbResults.push({
-              type: 'employee_search',
-              data: searchData,
-              description: `Hasil pencarian karyawan dengan keyword: ${nameOrBadge}`
-            });
-          }
-        }
-      } catch (err) {
-        console.log("⚠️ Error pencarian employees:", err.message);
-      }
-    }
+    //     if (nameOrBadge.length > 2) { // minimal 3 karakter
+    //       const searchQuery = `
+    //         SELECT TOP 10 *
+    //         FROM employees
+    //         WHERE name LIKE '%${nameOrBadge}%'
+    //            OR badgeId LIKE '%${nameOrBadge}%'
+    //            OR email LIKE '%${nameOrBadge}%'
+    //         ORDER BY last_updated DESC
+    //       `;
+    //       const searchData = await queryDB(searchQuery);
+    //       if (searchData && searchData.length > 0) {
+    //         dbResults.push({
+    //           type: 'employee_search',
+    //           data: searchData,
+    //           description: `Hasil pencarian karyawan dengan keyword: ${nameOrBadge}`
+    //         });
+    //       }
+    //     }
+    //   } catch (err) {
+    //     console.log("⚠️ Error pencarian employees:", err.message);
+    //   }
+    // }
 
     return dbResults;
   } catch (error) {
