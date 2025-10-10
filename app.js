@@ -613,8 +613,9 @@ async function callAI(userMessage, sessionId = 'default', mode = 'internal') {
     // 2. Ambil conversation context dari session
     const conversationContext = getConversationContext(sessionId, 3);
 
-    // 3. Buat prompt menggunakan modular system
-    const contextPrompt = buildAnswerPrompt(userMessage, dbResults, conversationContext);
+    // 3. Buat prompt menggunakan modular system (dengan mode parameter)
+    const originalMode = mode === 'skip_search' ? 'internal' : mode; // Restore original mode for prompt
+    const contextPrompt = buildAnswerPrompt(userMessage, dbResults, conversationContext, originalMode);
 
     if (conversationContext) {
       console.log("💭 Menggunakan conversation history untuk konteks");

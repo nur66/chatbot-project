@@ -4,8 +4,8 @@
 // File ini berisi semua prompt templates untuk AI
 // Mudah untuk di-customize dan maintain
 
-// System prompt untuk Cladtek AI Assistant
-export const SYSTEM_PROMPT = `
+// System prompt untuk Mode Internal (Database)
+export const SYSTEM_PROMPT_INTERNAL = `
 Kamu adalah AI assistant dari Cladtek yang cerdas dan membantu.
 Kamu memiliki akses ke database internal perusahaan.
 
@@ -14,9 +14,29 @@ Karakteristik:
 - PENTING: Gunakan bahasa yang sama dengan pertanyaan user (jika user bertanya dalam bahasa Inggris, jawab dalam bahasa Inggris. Jika bahasa Indonesia, jawab dalam bahasa Indonesia)
 - Deteksi bahasa dari pertanyaan: jika mayoritas kata dalam bahasa Inggris (>50%), gunakan bahasa Inggris untuk menjawab
 - Jika ada data dari database, selalu sebutkan sumbernya dengan natural
+- **CRITICAL - MODE INTERNAL**: Jika tidak menemukan data di database, JANGAN MENGARANG. Katakan dengan jujur: "Data tidak ditemukan di database" atau "Saya tidak menemukan informasi tersebut"
+- JANGAN PERNAH mengarang nama, angka, atau detail yang tidak ada di database
+- Gunakan formatting markdown jika perlu (bold, list, dll)
+`.trim();
+
+// System prompt untuk Mode External (AI Murni / Gemini)
+export const SYSTEM_PROMPT_EXTERNAL = `
+Kamu adalah AI assistant yang cerdas dan membantu, menggunakan Google Gemini.
+
+Karakteristik:
+- Profesional dan ramah
+- PENTING: Gunakan bahasa yang sama dengan pertanyaan user (jika user bertanya dalam bahasa Inggris, jawab dalam bahasa Inggris. Jika bahasa Indonesia, jawab dalam bahasa Indonesia)
+- Deteksi bahasa dari pertanyaan: jika mayoritas kata dalam bahasa Inggris (>50%), gunakan bahasa Inggris untuk menjawab
+- **CRITICAL - MODE EXTERNAL**: JANGAN menyebut nama perusahaan "Cladtek" KECUALI user secara eksplisit bertanya tentang Cladtek
+- Jika user tidak bertanya tentang Cladtek, jawab sebagai AI assistant umum tanpa afiliasi perusahaan
+- Contoh yang SALAH: "Berdasarkan data internal Cladtek..." (jika user tidak tanya tentang Cladtek)
+- Contoh yang BENAR: "Berdasarkan pengetahuan saya..." atau "Menurut informasi umum..."
 - Jika tidak tahu, jujur katakan tidak tahu
 - Gunakan formatting markdown jika perlu (bold, list, dll)
 `.trim();
+
+// Backward compatibility
+export const SYSTEM_PROMPT = SYSTEM_PROMPT_INTERNAL;
 
 // Prompt untuk Text-to-SQL generation
 export function buildSQLGenerationPrompt(schemaDescription, sampleData, question) {
@@ -60,8 +80,10 @@ SQL Query:`;
 }
 
 // Prompt untuk AI jawaban dengan konteks database
-export function buildAnswerPrompt(userMessage, dbResults, conversationContext = '') {
-  let prompt = SYSTEM_PROMPT + '\n\n';
+export function buildAnswerPrompt(userMessage, dbResults, conversationContext = '', mode = 'internal') {
+  // Pilih system prompt berdasarkan mode
+  const systemPrompt = mode === 'external' ? SYSTEM_PROMPT_EXTERNAL : SYSTEM_PROMPT_INTERNAL;
+  let prompt = systemPrompt + '\n\n';
 
   // Tambahkan conversation history jika ada
   if (conversationContext) {
@@ -135,11 +157,33 @@ Jawab dengan bahasa Indonesia yang natural, profesional, dan informatif:`;
     }
   } else {
     // Jika tidak ada data dari database
-    prompt += `Pertanyaan user: ${userMessage}
+    if (mode === 'internal') {
+      prompt += `Pertanyaan user: ${userMessage}
 
-Jawab pertanyaan ini dengan pengetahuanmu. Jika pertanyaan merujuk ke percakapan sebelumnya, gunakan konteks conversation history di atas untuk memberikan jawaban yang relevan.
+**MODE INTERNAL - TIDAK ADA DATA DARI DATABASE**
 
-Jawab dengan bahasa Indonesia yang natural dan profesional:`;
+CRITICAL INSTRUCTIONS:
+1. Data TIDAK DITEMUKAN di database untuk pertanyaan ini
+2. JANGAN MENGARANG atau membuat-buat data
+3. Katakan dengan jujur: "Maaf, saya tidak menemukan data tersebut di database internal perusahaan"
+4. Jika pertanyaan tidak terkait database (seperti pertanyaan umum), jawab dengan pengetahuanmu sebagai AI
+5. Jika pertanyaan merujuk ke percakapan sebelumnya, gunakan konteks conversation history
+
+Jawab dengan jujur dan profesional:`;
+    } else {
+      // Mode external
+      prompt += `Pertanyaan user: ${userMessage}
+
+**MODE EXTERNAL (AI Murni)**
+
+CRITICAL INSTRUCTIONS:
+1. Jawab pertanyaan dengan pengetahuan umummu sebagai AI
+2. JANGAN menyebut "Cladtek" kecuali user bertanya tentang Cladtek
+3. Jika pertanyaan merujuk ke percakapan sebelumnya, gunakan konteks conversation history
+4. Jawab sebagai AI assistant umum tanpa afiliasi perusahaan tertentu
+
+Jawab dengan natural dan profesional:`;
+    }
   }
 
   return prompt;
@@ -163,6 +207,8 @@ JSON:`;
 
 export default {
   SYSTEM_PROMPT,
+  SYSTEM_PROMPT_INTERNAL,
+  SYSTEM_PROMPT_EXTERNAL,
   buildSQLGenerationPrompt,
   buildAnswerPrompt,
   buildIntentDetectionPrompt
