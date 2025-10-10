@@ -5,11 +5,62 @@ import path from "path";
 import { fileURLToPath } from 'url';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { connectDB, queryDB, getTableSchema, getSampleData } from "./db.js";
+import { buildSQLGenerationPrompt, buildAnswerPrompt } from "./prompts.js";
+import { findTableMapping, TABLE_MAPPINGS } from "./tableMapping.js";
 
 dotenv.config();
 
 const app = express();
 const port = 3000;
+
+// Session storage untuk conversation history (in-memory)
+const sessions = new Map();
+
+// Helper function untuk manage session
+function getOrCreateSession(sessionId) {
+  if (!sessions.has(sessionId)) {
+    sessions.set(sessionId, {
+      id: sessionId,
+      history: [],
+      createdAt: new Date(),
+      lastActivity: new Date(),
+      authState: 'none', // 'none', 'pending_password', 'authenticated'
+      debugMode: false,
+      userName: null
+    });
+  }
+  return sessions.get(sessionId);
+}
+
+function addToHistory(sessionId, role, content, metadata = {}) {
+  const session = getOrCreateSession(sessionId);
+  session.history.push({
+    role, // 'user' atau 'assistant'
+    content,
+    timestamp: new Date(),
+    ...metadata
+  });
+  session.lastActivity = new Date();
+
+  // Keep only last 20 messages untuk efisiensi
+  if (session.history.length > 20) {
+    session.history = session.history.slice(-20);
+  }
+}
+
+function getConversationContext(sessionId, limit = 5) {
+  const session = sessions.get(sessionId);
+  if (!session || session.history.length === 0) {
+    return '';
+  }
+
+  // Ambil N percakapan terakhir untuk konteks
+  const recentHistory = session.history.slice(-limit * 2); // user + assistant
+
+  return recentHistory.map(msg => {
+    return `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`;
+  }).join('\n');
+}
 
 // Validasi API key
 const API_KEY = process.env.GEMINI_API_KEY;
@@ -29,65 +80,90 @@ const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 // Connect ke database saat startup (dengan graceful error handling)
 let employeesSchema = null;
 let employeesSample = null;
+let obcardSchema = null;
+let obcardSample = null;
+const tableSchemas = new Map(); // Store all table schemas
 
 try {
   await connectDB();
 
-  // Load schema dan sample data untuk employees saat startup
-  console.log("📊 Loading employees table schema...");
-  employeesSchema = await getTableSchema('employees');
-  employeesSample = await getSampleData('employees', 2);
+  // Load schema untuk semua mapped tables
+  console.log("📊 Loading table schemas...");
 
-  if (employeesSchema && employeesSchema.length > 0) {
-    console.log(`✅ Schema loaded: ${employeesSchema.length} columns`);
+  for (const mapping of TABLE_MAPPINGS) {
+    try {
+      const schema = await getTableSchema(mapping.tableName);
+      const sample = await getSampleData(mapping.tableName, 2);
+
+      if (schema && schema.length > 0) {
+        tableSchemas.set(mapping.tableName, {
+          schema,
+          sample,
+          mapping
+        });
+        console.log(`✅ ${mapping.tableName}: ${schema.length} columns`);
+      }
+    } catch (err) {
+      console.log(`⚠️ ${mapping.tableName}: tidak ditemukan atau error`);
+    }
   }
+
+  // Keep legacy variables for backward compatibility
+  if (tableSchemas.has('employees')) {
+    employeesSchema = tableSchemas.get('employees').schema;
+    employeesSample = tableSchemas.get('employees').sample;
+  }
+
+  if (tableSchemas.has('RecordOBCard')) {
+    obcardSchema = tableSchemas.get('RecordOBCard').schema;
+    obcardSample = tableSchemas.get('RecordOBCard').sample;
+  }
+
 } catch (error) {
   console.log("⚠️ Server tetap berjalan tanpa koneksi database");
   console.log("⚠️ Mode: AI Only (tanpa database)");
 }
 
 // Fungsi untuk generate SQL query menggunakan AI (Text-to-SQL)
-async function generateSQLFromQuestion(question) {
+async function generateSQLFromQuestion(question, tableName = 'employees') {
   try {
-    if (!employeesSchema || employeesSchema.length === 0) {
+    // Get schema for specified table
+    const tableInfo = tableSchemas.get(tableName);
+
+    if (!tableInfo || !tableInfo.schema || tableInfo.schema.length === 0) {
+      console.log(`⚠️ Schema untuk ${tableName} tidak tersedia`);
       return null;
     }
 
-    // Buat deskripsi schema yang mudah dipahami AI
-    const schemaDescription = employeesSchema.map(col => {
-      return `- ${col.columnName} (${col.dataType}${col.maxLength ? `(${col.maxLength})` : ''}): ${col.isNullable === 'YES' ? 'nullable' : 'required'}`;
+    const { schema, sample, mapping } = tableInfo;
+
+    // Buat deskripsi schema dengan field aliases
+    const columnDescriptions = schema.map(col => {
+      // Find alias for this column
+      const aliases = [];
+      if (mapping && mapping.fieldAliases) {
+        for (const [alias, realCol] of Object.entries(mapping.fieldAliases)) {
+          if (realCol === col.columnName) {
+            aliases.push(alias);
+          }
+        }
+      }
+
+      const aliasText = aliases.length > 0 ? ` (alias: ${aliases.join(', ')})` : '';
+      return `- ${col.columnName}${aliasText} (${col.dataType}${col.maxLength ? `(${col.maxLength})` : ''}): ${col.isNullable === 'YES' ? 'nullable' : 'required'}`;
     }).join('\n');
 
+    // Add table name at the beginning
+    const schemaDescription = `Table name: ${tableName}\nColumns:\n${columnDescriptions}`;
+
     // Sample data untuk konteks
-    const sampleDataStr = employeesSample ? JSON.stringify(employeesSample, null, 2) : '';
+    const sampleDataStr = sample ? JSON.stringify(sample, null, 2) : '';
 
-    // Prompt untuk AI
-    const sqlPrompt = `
-You are an expert SQL query generator for SQL Server database.
+    // Add table description if available
+    const tableDesc = mapping && mapping.description ? `\nTable Description: ${mapping.description}` : '';
 
-TABLE SCHEMA:
-Table name: employees
-Columns:
-${schemaDescription}
-
-SAMPLE DATA (for context):
-${sampleDataStr}
-
-USER QUESTION: "${question}"
-
-INSTRUCTIONS:
-1. Generate ONLY a valid SQL Server query based on the question
-2. Use TOP instead of LIMIT for SQL Server
-3. Return ONLY the SQL query, no explanations
-4. Use appropriate aggregations (COUNT, SUM, AVG, etc.) when needed
-5. Use GROUP BY when showing breakdown by categories
-6. Handle NULL values appropriately
-7. For text searches, use LIKE with wildcards
-8. Maximum 100 rows for safety (TOP 100)
-
-IMPORTANT: Return ONLY the SQL query, nothing else. No markdown, no code blocks, just pure SQL.
-
-SQL Query:`;
+    // Gunakan modular prompt system
+    const sqlPrompt = buildSQLGenerationPrompt(schemaDescription + tableDesc, sampleDataStr, question);
 
     const result = await model.generateContent(sqlPrompt);
     const response = await result.response;
@@ -108,35 +184,100 @@ SQL Query:`;
 // Fungsi untuk mencari data dari database berdasarkan pertanyaan
 async function searchDatabase(question) {
   try {
+    console.log("🔎 [DEBUG] searchDatabase called with:", question);
     const lowerQuestion = question.toLowerCase();
     let dbResults = [];
 
-    // PRIORITAS 1: Coba AI-Generated SQL Query (Text-to-SQL)
-    // Ini akan bekerja untuk pertanyaan apapun tentang employees
-    if (lowerQuestion.includes('karyawan') || lowerQuestion.includes('employee') ||
-        lowerQuestion.includes('pegawai') || lowerQuestion.includes('staff')) {
+    // PRIORITAS 1: Check if question matches any table mapping
+    const tableMapping = findTableMapping(question);
+    console.log("🔎 [DEBUG] findTableMapping result:", tableMapping ? tableMapping.tableName : 'null');
 
+    if (tableMapping) {
+      console.log(`🎯 Detected table: ${tableMapping.tableName}`);
       console.log("🧠 Menggunakan AI untuk generate SQL query...");
 
-      const aiGeneratedSQL = await generateSQLFromQuestion(question);
+      const aiGeneratedSQL = await generateSQLFromQuestion(question, tableMapping.tableName);
+      console.log("🔎 [DEBUG] AI generated SQL:", aiGeneratedSQL);
 
       if (aiGeneratedSQL) {
         try {
+          console.log("🔎 [DEBUG] Executing SQL query...");
           const aiResults = await queryDB(aiGeneratedSQL);
+          console.log("🔎 [DEBUG] Query results count:", aiResults ? aiResults.length : 0);
 
-          if (aiResults && aiResults.length > 0) {
+          // Check if this is a COUNT(*) query with 0 results
+          const isCountQuery = aiGeneratedSQL.toUpperCase().includes('COUNT(');
+          let hasResults = aiResults && aiResults.length > 0;
+
+          if (isCountQuery && hasResults) {
+            // For COUNT queries, check the actual count value
+            const firstRow = aiResults[0];
+            const countValue = Object.values(firstRow)[0]; // Get first column value
+            console.log("🔎 [DEBUG] COUNT query result value:", countValue);
+            hasResults = countValue > 0;
+          }
+
+          if (hasResults) {
             dbResults.push({
               type: 'ai_generated_query',
               data: aiResults,
-              description: 'Data karyawan dari AI-generated query',
+              description: tableMapping.description,
               sql_query: aiGeneratedSQL,
-              query_method: 'AI Text-to-SQL'
+              query_method: 'AI Text-to-SQL',
+              table_name: tableMapping.tableName
             });
 
             console.log(`✅ AI query berhasil: ${aiResults.length} rows`);
 
             // Return langsung jika AI query berhasil
             return dbResults;
+          } else {
+            console.log("🔎 [DEBUG] Query returned 0 results (checking count value)");
+
+            // If query returned 0 results and it's a name-based search, try to find similar names
+            if (aiGeneratedSQL.includes('LIKE') && aiGeneratedSQL.includes('EmpName')) {
+              console.log("🔍 Searching for similar names...");
+
+              // Extract the name from the question
+              const nameMatch = question.match(/atas nama\s+([A-Za-z\s]+)/i) ||
+                               question.match(/nama\s+([A-Za-z\s]+)/i) ||
+                               question.match(/([A-Za-z]+\s+[A-Za-z]+)/);
+
+              if (nameMatch && nameMatch[1]) {
+                const searchName = nameMatch[1].trim();
+                const nameParts = searchName.split(/\s+/);
+
+                try {
+                  // Search for partial matches in EmpName
+                  const conditions = nameParts.map(part => `EmpName LIKE '%${part}%'`);
+                  const fuzzyQuery = `
+                    SELECT DISTINCT TOP 5 EmpName
+                    FROM ${tableMapping.tableName}
+                    WHERE ${conditions.join(' OR ')}
+                    ORDER BY EmpName`;
+
+                  console.log("🔎 Fuzzy search SQL:", fuzzyQuery);
+                  const suggestions = await queryDB(fuzzyQuery);
+
+                  if (suggestions && suggestions.length > 0) {
+                    dbResults.push({
+                      type: 'name_suggestions',
+                      data: suggestions,
+                      searched_name: searchName,
+                      description: `Nama "${searchName}" tidak ditemukan. Berikut adalah nama yang mirip:`,
+                      sql_query: fuzzyQuery,
+                      query_method: 'Fuzzy Name Matching'
+                    });
+                    console.log(`✅ Found ${suggestions.length} similar names`);
+                    return dbResults;
+                  }
+                } catch (fuzzyError) {
+                  console.log("⚠️ Fuzzy search error:", fuzzyError.message);
+                }
+              }
+            }
+
+            console.log("🔎 [DEBUG] Continuing to fallback queries...");
           }
         } catch (sqlError) {
           console.log("⚠️ AI-generated SQL error, fallback ke hardcoded queries");
@@ -144,7 +285,11 @@ async function searchDatabase(question) {
           console.log("Error:", sqlError.message);
           // Lanjut ke hardcoded queries sebagai fallback
         }
+      } else {
+        console.log("🔎 [DEBUG] AI generated SQL is null/empty");
       }
+    } else {
+      console.log("🔎 [DEBUG] No table mapping found, using fallback queries");
     }
 
     // FALLBACK: Hardcoded queries (jika AI query gagal atau tidak applicable)
@@ -306,45 +451,161 @@ async function searchDatabase(question) {
 }
 
 // Fungsi untuk call AI dengan konteks dari database (HYBRID SYSTEM)
-async function callAI(userMessage) {
+async function callAI(userMessage, sessionId = 'default', mode = 'internal') {
   try {
-    // 1. Cari data dari database terlebih dahulu
-    console.log("🔍 Mencari data dari database...");
-    const dbResults = await searchDatabase(userMessage);
+    console.log(`🔄 Mode: ${mode}`);
 
-    // 2. Buat prompt dengan konteks database
-    let contextPrompt = userMessage;
+    const session = getOrCreateSession(sessionId);
+    let dbResults = [];
+    let sqlQuery = null;
+    let tableName = null;
+    let mappingInfo = null;
 
-    if (dbResults.length > 0) {
-      console.log(`✅ Ditemukan ${dbResults.length} hasil dari database`);
+    // === AUTHENTICATION CHECK ===
+    // Check if user says "Hai saya Nur Iswanto"
+    if (userMessage.toLowerCase().includes('hai saya nur iswanto')) {
+      console.log("🔐 Auth request detected from Nur Iswanto");
+      session.authState = 'pending_password';
+      session.userName = 'Nur Iswanto';
 
-      // Tambahkan konteks database ke prompt
-      contextPrompt = `
-Kamu adalah AI assistant dari Cladtek yang memiliki akses ke database lokal.
+      const answer = "Halo Bapak Nur Iswanto! 👋\n\nUntuk mengaktifkan **Debug Mode**, silakan masukkan password Anda.\n\n🔑 Ketik password untuk melanjutkan.";
 
-Pertanyaan user: ${userMessage}
+      addToHistory(sessionId, 'user', userMessage);
+      addToHistory(sessionId, 'assistant', answer);
 
-Data dari database yang relevan:
-${JSON.stringify(dbResults, null, 2)}
-
-Instruksi:
-1. Gunakan data dari database di atas untuk menjawab pertanyaan user
-2. Jika data tidak mencukupi, gunakan pengetahuan umummu
-3. Berikan jawaban yang informatif dan mudah dipahami
-4. Jika ada data dalam bentuk tabel/array, ringkas menjadi informasi yang mudah dibaca
-5. Selalu sebutkan bahwa data berasal dari database internal Cladtek
-
-Jawab dengan bahasa Indonesia yang natural dan profesional:
-`;
-    } else {
-      console.log("ℹ️ Tidak ada data relevan dari database, menggunakan AI saja");
-      contextPrompt = `Kamu adalah AI assistant dari Cladtek. ${userMessage}`;
+      return answer;
     }
 
-    // 3. Kirim ke Gemini AI
+    // Check if waiting for password
+    if (session.authState === 'pending_password') {
+      if (userMessage.trim() === '5553') {
+        console.log("✅ Password correct - Debug mode activated");
+        session.authState = 'authenticated';
+        session.debugMode = true;
+
+        const answer = `✅ **Password Benar!**\n\n**Debug Mode AKTIF** untuk ${session.userName}\n\n` +
+          `Sekarang setiap pertanyaan Anda akan menampilkan:\n` +
+          `📊 **Datasource** - Tabel yang digunakan\n` +
+          `🔍 **SQL Query** - Query yang dijalankan\n` +
+          `🗺️ **Mapping Info** - Lokasi mapping prompt\n\n` +
+          `Silakan bertanya sesuatu untuk melihat detail teknisnya!`;
+
+        addToHistory(sessionId, 'user', userMessage);
+        addToHistory(sessionId, 'assistant', answer);
+
+        return answer;
+      } else {
+        console.log("❌ Wrong password");
+        session.authState = 'none';
+
+        const answer = "❌ **Password Salah!**\n\nDebug mode tidak diaktifkan. Silakan coba lagi dengan mengatakan:\n\"Hai saya Nur Iswanto\"";
+
+        addToHistory(sessionId, 'user', userMessage);
+        addToHistory(sessionId, 'assistant', answer);
+
+        return answer;
+      }
+    }
+
+    // === NORMAL FLOW ===
+    // 1. Cari data dari database hanya jika mode internal
+    if (mode === 'internal') {
+      console.log("🔍 Mencari data dari database...");
+
+      // Get table mapping info for debug mode
+      const tableMapping = findTableMapping(userMessage);
+      if (tableMapping) {
+        tableName = tableMapping.tableName;
+        mappingInfo = {
+          file: 'tableMapping.js',
+          tableName: tableMapping.tableName,
+          keywords: tableMapping.keywords,
+          description: tableMapping.description,
+          fieldAliases: tableMapping.fieldAliases
+        };
+      }
+
+      dbResults = await searchDatabase(userMessage);
+
+      // Extract SQL query from dbResults if available
+      if (dbResults.length > 0) {
+        console.log(`✅ Ditemukan ${dbResults.length} hasil dari database`);
+
+        const aiResult = dbResults.find(r => r.type === 'ai_generated_query');
+        if (aiResult) {
+          sqlQuery = aiResult.sql_query;
+        }
+      } else {
+        console.log("ℹ️ Tidak ada data relevan dari database");
+      }
+    } else {
+      console.log("🌐 Mode External: Skip database search");
+    }
+
+    // 2. Ambil conversation context dari session
+    const conversationContext = getConversationContext(sessionId, 3);
+
+    // 3. Buat prompt menggunakan modular system
+    const contextPrompt = buildAnswerPrompt(userMessage, dbResults, conversationContext);
+
+    if (conversationContext) {
+      console.log("💭 Menggunakan conversation history untuk konteks");
+    }
+
+    // 4. Kirim ke Gemini AI
     const result = await model.generateContent(contextPrompt);
     const response = await result.response;
-    return response.text();
+    let answer = response.text();
+
+    // 5. Add debug info if authenticated
+    if (session.debugMode && session.authState === 'authenticated') {
+      console.log("🐛 Adding debug info to response");
+
+      let debugInfo = '\n\n---\n**🔧 DEBUG INFO (Nur Iswanto)**\n\n';
+
+      debugInfo += `📊 **Datasource:**\n`;
+      if (tableName) {
+        debugInfo += `- Table: \`${tableName}\`\n`;
+        debugInfo += `- Database: \`global_dashboard\` (SQL Server)\n`;
+      } else {
+        debugInfo += `- Mode External (Tidak mengakses database)\n`;
+      }
+
+      debugInfo += `\n🔍 **SQL Query:**\n`;
+      if (sqlQuery) {
+        debugInfo += `\`\`\`sql\n${sqlQuery}\n\`\`\`\n`;
+      } else {
+        debugInfo += `- Tidak ada query (mode external atau tidak ada keyword)\n`;
+      }
+
+      debugInfo += `\n🗺️ **Mapping Info:**\n`;
+      if (mappingInfo) {
+        debugInfo += `- File: \`${mappingInfo.file}\`\n`;
+        debugInfo += `- Keywords: ${mappingInfo.keywords.join(', ')}\n`;
+        debugInfo += `- Description: ${mappingInfo.description}\n`;
+        if (mappingInfo.fieldAliases) {
+          debugInfo += `- Field Aliases:\n`;
+          for (const [alias, field] of Object.entries(mappingInfo.fieldAliases)) {
+            debugInfo += `  - "${alias}" → ${field}\n`;
+          }
+        }
+      } else {
+        debugInfo += `- Tidak ada mapping (mode external atau keyword tidak ditemukan)\n`;
+      }
+
+      debugInfo += `\n📝 **Prompt Location:**\n`;
+      debugInfo += `- File: \`prompts.js\`\n`;
+      debugInfo += `- Function: \`buildAnswerPrompt()\`\n`;
+      debugInfo += `- System Prompt: \`SYSTEM_PROMPT\` variable\n`;
+
+      answer += debugInfo;
+    }
+
+    // 6. Simpan ke history
+    addToHistory(sessionId, 'user', userMessage);
+    addToHistory(sessionId, 'assistant', answer);
+
+    return answer;
 
   } catch (error) {
     console.error("Error calling Gemini:", error.message);
@@ -362,16 +623,20 @@ app.get("/", (req, res) => {
 });
 
 app.post("/api/chat", async (req, res) => {
-  const { question } = req.body;
+  const { question, sessionId, mode } = req.body;
   if (!question) {
     return res.status(400).json({ error: "Question is required" });
   }
 
+  // Generate sessionId jika tidak ada (untuk backward compatibility)
+  const session = sessionId || 'default';
+  const chatMode = mode || 'internal'; // Default ke internal
+
   try {
-    console.log("\n💬 User:", question);
-    const answer = await callAI(question);
+    console.log(`\n💬 User [${session}] [Mode: ${chatMode}]:`, question);
+    const answer = await callAI(question, session, chatMode);
     console.log("🤖 AI:", answer.substring(0, 100) + "...\n");
-    res.json({ answer });
+    res.json({ answer, sessionId: session });
   } catch (error) {
     console.error("❌ Error:", error.message);
     res.status(500).json({ error: "Maaf, terjadi kesalahan saat memproses permintaan Anda." });

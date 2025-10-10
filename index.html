@@ -341,6 +341,32 @@
             transform: none;
         }
 
+        #cancel-button {
+            padding: 14px 28px;
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: none;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+        }
+
+        #cancel-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(239, 68, 68, 0.5);
+            background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+        }
+
+        #cancel-button.visible {
+            display: flex;
+        }
+
         .welcome-message {
             text-align: center;
             padding: 40px 20px;
@@ -405,6 +431,88 @@
             text-decoration: underline;
         }
 
+        /* Mode Selection Styles */
+        .mode-selection {
+            margin: 30px 0;
+        }
+
+        .mode-selection h3 {
+            font-size: 16px;
+            color: #1e293b;
+            margin-bottom: 15px;
+            font-weight: 600;
+        }
+
+        .mode-buttons {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .mode-btn {
+            flex: 1;
+            min-width: 200px;
+            max-width: 300px;
+            padding: 20px;
+            background: white;
+            border: 2px solid #e2e8f0;
+            border-radius: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            text-align: center;
+        }
+
+        .mode-btn:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 20px rgba(28, 154, 214, 0.2);
+            border-color: var(--primary-color);
+        }
+
+        .mode-btn.active {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            border-color: var(--primary-color);
+            color: white;
+            box-shadow: 0 8px 20px rgba(28, 154, 214, 0.4);
+        }
+
+        .mode-icon {
+            font-size: 32px;
+            display: block;
+        }
+
+        .mode-title {
+            font-size: 16px;
+            font-weight: 700;
+            display: block;
+        }
+
+        .mode-desc {
+            font-size: 12px;
+            opacity: 0.85;
+            display: block;
+        }
+
+        .mode-btn.active .mode-desc {
+            opacity: 1;
+        }
+
+        .mode-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: 10px;
+        }
+
         .powered-badge {
             display: inline-flex;
             align-items: center;
@@ -445,7 +553,13 @@
         <div id="chat-header">
             <div class="logo">CT</div>
             <div class="title">
-                <h1><span class="brand">Cladtek</span> AI Assistant</h1>
+                <h1>
+                    <span class="brand">Cladtek</span> AI Assistant
+                    <span class="mode-indicator" id="mode-indicator">
+                        <span id="mode-emoji">🏢</span>
+                        <span id="mode-text">Internal</span>
+                    </span>
+                </h1>
                 <p>
                     <span class="powered-badge">
                         <span class="tech-icon">✨</span>
@@ -460,17 +574,39 @@
             <div class="welcome-message">
                 <h2>👋 Selamat Datang di Cladtek AI</h2>
                 <p>Saya adalah AI assistant dari <strong style="color: #1C9AD6;">Cladtek</strong> yang siap membantu menjawab pertanyaan Anda</p>
+
+                <!-- Mode Selection -->
+                <div class="mode-selection">
+                    <h3>🎯 Pilih Mode Chat:</h3>
+                    <div class="mode-buttons">
+                        <button class="mode-btn active" data-mode="internal" onclick="selectMode('internal')">
+                            <span class="mode-icon">🏢</span>
+                            <span class="mode-title">Internal Cladtek</span>
+                            <span class="mode-desc">Data dari database perusahaan</span>
+                        </button>
+                        <button class="mode-btn" data-mode="external" onclick="selectMode('external')">
+                            <span class="mode-icon">🌐</span>
+                            <span class="mode-title">AI Gemini Murni</span>
+                            <span class="mode-desc">Pengetahuan umum tanpa database</span>
+                        </button>
+                    </div>
+                </div>
+
                 <div class="quick-questions">
+                    <div class="quick-question" onclick="askQuestion('Berapa total karyawan Cladtek?')">👥 Total Karyawan</div>
+                    <div class="quick-question" onclick="askQuestion('Tampilkan obcard yang ada bukti fotonya')">📸 OBCard Foto</div>
                     <div class="quick-question" onclick="askQuestion('Apa itu AI?')">💡 Apa itu AI?</div>
-                    <div class="quick-question" onclick="askQuestion('Jelaskan tentang machine learning')">🤖 Machine Learning</div>
-                    <div class="quick-question" onclick="askQuestion('Cara belajar programming?')">💻 Belajar Programming</div>
-                    <div class="quick-question" onclick="askQuestion('Apa itu Cladtek?')">🏢 Tentang Cladtek</div>
+                    <div class="quick-question" onclick="askQuestion('Jelaskan machine learning')">🤖 Machine Learning</div>
                 </div>
             </div>
         </div>
 
         <form id="chat-form">
-            <input type="text" id="chat-input" placeholder="Ketik pertanyaan Anda..." autocomplete="off" required>
+            <input type="text" id="chat-input" placeholder="Ketik pertanyaan Anda (↑↓ untuk history)..." autocomplete="off" required>
+            <button id="cancel-button" type="button">
+                <span>Cancel</span>
+                <span>⛔</span>
+            </button>
             <button id="send-button" type="submit">
                 <span>Kirim</span>
                 <span>🚀</span>
@@ -487,15 +623,143 @@
         const chatForm = document.getElementById('chat-form');
         const chatInput = document.getElementById('chat-input');
         const sendButton = document.getElementById('send-button');
+        const cancelButton = document.getElementById('cancel-button');
+
         let isTyping = false;
-
-        // Remove welcome message on first interaction
         let isFirstMessage = true;
+        let abortController = null; // For canceling requests
+        let typeInterval = null; // For canceling typing animation
 
+        // ===== MODE MANAGEMENT =====
+        let chatMode = localStorage.getItem('chat_mode') || 'internal';
+
+        function selectMode(mode) {
+            chatMode = mode;
+            localStorage.setItem('chat_mode', mode);
+
+            // Update UI
+            document.querySelectorAll('.mode-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.querySelector(`.mode-btn[data-mode="${mode}"]`).classList.add('active');
+
+            // Update header indicator
+            const modeEmoji = document.getElementById('mode-emoji');
+            const modeText = document.getElementById('mode-text');
+
+            if (mode === 'internal') {
+                modeEmoji.textContent = '🏢';
+                modeText.textContent = 'Internal';
+            } else {
+                modeEmoji.textContent = '🌐';
+                modeText.textContent = 'External';
+            }
+
+            console.log('🔄 Mode switched to:', mode);
+        }
+
+        // ===== SESSION MANAGEMENT =====
+        let sessionId = localStorage.getItem('chat_session_id');
+        if (!sessionId) {
+            sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            localStorage.setItem('chat_session_id', sessionId);
+        }
+
+        // Set initial mode on load
+        window.addEventListener('DOMContentLoaded', () => {
+            selectMode(chatMode);
+        });
+
+        // ===== QUESTION HISTORY (Arrow Up/Down) =====
+        let questionHistory = JSON.parse(localStorage.getItem('question_history') || '[]');
+        let historyIndex = -1;
+        let currentInput = '';
+
+        function saveQuestionToHistory(question) {
+            // Add to beginning of array
+            questionHistory.unshift(question);
+
+            // Keep only last 50 questions
+            if (questionHistory.length > 50) {
+                questionHistory = questionHistory.slice(0, 50);
+            }
+
+            // Save to localStorage
+            localStorage.setItem('question_history', JSON.stringify(questionHistory));
+
+            // Reset history index
+            historyIndex = -1;
+        }
+
+        // Arrow up/down navigation
+        chatInput.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+
+                if (questionHistory.length === 0) return;
+
+                // Save current input if we're at the beginning
+                if (historyIndex === -1) {
+                    currentInput = chatInput.value;
+                }
+
+                // Navigate up in history
+                if (historyIndex < questionHistory.length - 1) {
+                    historyIndex++;
+                    chatInput.value = questionHistory[historyIndex];
+                }
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+
+                if (historyIndex === -1) return;
+
+                // Navigate down in history
+                if (historyIndex > 0) {
+                    historyIndex--;
+                    chatInput.value = questionHistory[historyIndex];
+                } else {
+                    // Back to current input
+                    historyIndex = -1;
+                    chatInput.value = currentInput;
+                }
+            }
+        });
+
+        // ===== CANCEL BUTTON =====
+        cancelButton.addEventListener('click', () => {
+            if (abortController) {
+                abortController.abort();
+                console.log('🛑 Request canceled by user');
+            }
+
+            if (typeInterval) {
+                clearInterval(typeInterval);
+                typeInterval = null;
+            }
+
+            // Remove typing indicator
+            const typingIndicator = chatHistory.querySelector('.message.bot:last-child');
+            if (typingIndicator) {
+                typingIndicator.remove();
+            }
+
+            appendMessage('bot', '❌ Permintaan dibatalkan oleh user.');
+
+            // Reset state
+            isTyping = false;
+            sendButton.disabled = false;
+            cancelButton.classList.remove('visible');
+            chatInput.focus();
+        });
+
+        // ===== FORM SUBMIT =====
         chatForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const userMessage = chatInput.value.trim();
             if (!userMessage || isTyping) return;
+
+            // Save to history
+            saveQuestionToHistory(userMessage);
 
             // Remove welcome message if first interaction
             if (isFirstMessage) {
@@ -507,16 +771,25 @@
             appendMessage('user', userMessage);
             chatInput.value = '';
             sendButton.disabled = true;
+            cancelButton.classList.add('visible');
             isTyping = true;
 
             // Show typing indicator
             const typingIndicator = showTypingIndicator();
 
+            // Create AbortController for this request
+            abortController = new AbortController();
+
             try {
                 const response = await fetch('/api/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ question: userMessage })
+                    body: JSON.stringify({
+                        question: userMessage,
+                        sessionId: sessionId,
+                        mode: chatMode
+                    }),
+                    signal: abortController.signal
                 });
 
                 if (!response.ok) {
@@ -532,12 +805,19 @@
                 await appendMessageWithTyping('bot', data.answer);
 
             } catch (error) {
-                console.error('Error:', error);
-                typingIndicator.remove();
-                appendMessage('bot', 'Maaf, terjadi kesalahan saat memproses permintaan Anda.');
+                if (error.name === 'AbortError') {
+                    console.log('Fetch aborted');
+                    // Don't show error message, cancel button already handled it
+                } else {
+                    console.error('Error:', error);
+                    typingIndicator.remove();
+                    appendMessage('bot', 'Maaf, terjadi kesalahan saat memproses permintaan Anda.');
+                }
             } finally {
                 sendButton.disabled = false;
+                cancelButton.classList.remove('visible');
                 isTyping = false;
+                abortController = null;
                 chatInput.focus();
             }
         });
@@ -603,7 +883,7 @@
             let displayText = '';
 
             return new Promise((resolve) => {
-                const typeInterval = setInterval(() => {
+                typeInterval = setInterval(() => {
                     if (index < message.length) {
                         displayText += message.charAt(index);
                         // Update with parsed markdown
@@ -612,6 +892,7 @@
                         chatHistory.scrollTop = chatHistory.scrollHeight;
                     } else {
                         clearInterval(typeInterval);
+                        typeInterval = null;
                         resolve();
                     }
                 }, speed);
