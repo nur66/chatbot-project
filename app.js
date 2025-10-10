@@ -462,8 +462,8 @@ async function callAI(userMessage, sessionId = 'default', mode = 'internal') {
     let mappingInfo = null;
 
     // === AUTHENTICATION CHECK ===
-    // Check if user says "Hai saya Nur Iswanto"
-    if (userMessage.toLowerCase().includes('hai saya nur iswanto')) {
+    // Check if user says "saya Nur Iswanto" (case insensitive)
+    if (userMessage.toLowerCase().includes('saya nur iswanto')) {
       console.log("🔐 Auth request detected from Nur Iswanto");
       session.authState = 'pending_password';
       session.userName = 'Nur Iswanto';
@@ -490,7 +490,8 @@ async function callAI(userMessage, sessionId = 'default', mode = 'internal') {
           `🗺️ **Mapping Info** - Lokasi mapping prompt\n\n` +
           `Silakan bertanya sesuatu untuk melihat detail teknisnya!`;
 
-        addToHistory(sessionId, 'user', userMessage);
+        // Mask password in history
+        addToHistory(sessionId, 'user', '****');
         addToHistory(sessionId, 'assistant', answer);
 
         return answer;
@@ -498,9 +499,10 @@ async function callAI(userMessage, sessionId = 'default', mode = 'internal') {
         console.log("❌ Wrong password");
         session.authState = 'none';
 
-        const answer = "❌ **Password Salah!**\n\nDebug mode tidak diaktifkan. Silakan coba lagi dengan mengatakan:\n\"Hai saya Nur Iswanto\"";
+        const answer = "❌ **Password Salah!**\n\nDebug mode tidak diaktifkan. Silakan coba lagi dengan mengatakan:\n\"saya Nur Iswanto\"";
 
-        addToHistory(sessionId, 'user', userMessage);
+        // Mask wrong password in history
+        addToHistory(sessionId, 'user', '****');
         addToHistory(sessionId, 'assistant', answer);
 
         return answer;
@@ -512,20 +514,86 @@ async function callAI(userMessage, sessionId = 'default', mode = 'internal') {
     if (mode === 'internal') {
       console.log("🔍 Mencari data dari database...");
 
-      // Get table mapping info for debug mode
-      const tableMapping = findTableMapping(userMessage);
-      if (tableMapping) {
-        tableName = tableMapping.tableName;
-        mappingInfo = {
-          file: 'tableMapping.js',
-          tableName: tableMapping.tableName,
-          keywords: tableMapping.keywords,
-          description: tableMapping.description,
-          fieldAliases: tableMapping.fieldAliases
-        };
+      // === DETECT FOLLOW-UP QUESTIONS FOR DETAIL DATA ===
+      const isDetailRequest = /^(siapa saja|tampilkan (daftarnya|namanya|semua|semuanya)|show (me )?(the )?(list|names|all)|who are they)\??$/i.test(userMessage.trim());
+
+      if (isDetailRequest && session.history.length >= 2) {
+        console.log("🔄 Detected detail request - extracting context from previous query");
+
+        // Look for previous SQL query in history
+        for (let i = session.history.length - 1; i >= Math.max(0, session.history.length - 6); i--) {
+          const msg = session.history[i];
+          if (msg.sql_query) {
+            const previousSQL = msg.sql_query;
+            console.log("📝 Found previous SQL:", previousSQL);
+
+            // Extract WHERE clause from previous query
+            const whereMatch = previousSQL.match(/WHERE\s+(.*?)(?:ORDER BY|GROUP BY|$)/i);
+            const tableMatch = previousSQL.match(/FROM\s+(\w+)/i);
+
+            if (whereMatch && tableMatch) {
+              const whereClause = whereMatch[1].trim();
+              const fromTable = tableMatch[1];
+
+              // Generate new query to get detail data
+              const detailQuery = `SELECT TOP 50 * FROM ${fromTable} WHERE ${whereClause} ORDER BY name`;
+              console.log("🔄 Re-querying with details:", detailQuery);
+
+              try {
+                const detailResults = await queryDB(detailQuery);
+                if (detailResults && detailResults.length > 0) {
+                  dbResults = [{
+                    type: 'ai_generated_query',
+                    data: detailResults,
+                    description: `Detail data from previous query`,
+                    sql_query: detailQuery,
+                    query_method: 'Follow-up Detail Query',
+                    table_name: fromTable
+                  }];
+                  sqlQuery = detailQuery;
+                  tableName = fromTable;
+
+                  // Get mapping info for this table
+                  const tableMapping = TABLE_MAPPINGS.find(m => m.tableName === fromTable);
+                  if (tableMapping) {
+                    mappingInfo = {
+                      file: 'tableMapping.js',
+                      tableName: tableMapping.tableName,
+                      keywords: tableMapping.keywords,
+                      description: tableMapping.description,
+                      fieldAliases: tableMapping.fieldAliases
+                    };
+                  }
+
+                  console.log(`✅ Detail query successful: ${detailResults.length} rows`);
+                  // Skip normal searchDatabase since we already have results
+                  mode = 'skip_search';
+                }
+              } catch (err) {
+                console.log("⚠️ Detail query failed:", err.message);
+              }
+              break;
+            }
+          }
+        }
       }
 
-      dbResults = await searchDatabase(userMessage);
+      if (mode !== 'skip_search') {
+        // Get table mapping info for debug mode
+        const tableMapping = findTableMapping(userMessage);
+        if (tableMapping) {
+          tableName = tableMapping.tableName;
+          mappingInfo = {
+            file: 'tableMapping.js',
+            tableName: tableMapping.tableName,
+            keywords: tableMapping.keywords,
+            description: tableMapping.description,
+            fieldAliases: tableMapping.fieldAliases
+          };
+        }
+
+        dbResults = await searchDatabase(userMessage);
+      }
 
       // Extract SQL query from dbResults if available
       if (dbResults.length > 0) {
@@ -601,9 +669,9 @@ async function callAI(userMessage, sessionId = 'default', mode = 'internal') {
       answer += debugInfo;
     }
 
-    // 6. Simpan ke history
+    // 6. Simpan ke history with SQL query metadata
     addToHistory(sessionId, 'user', userMessage);
-    addToHistory(sessionId, 'assistant', answer);
+    addToHistory(sessionId, 'assistant', answer, { sql_query: sqlQuery, table_name: tableName });
 
     return answer;
 
