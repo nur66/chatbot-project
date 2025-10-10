@@ -6,12 +6,28 @@ import { fileURLToPath } from 'url';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { connectDB, queryDB, getTableSchema, getSampleData } from "./db.js";
 import { buildSQLGenerationPrompt, buildAnswerPrompt } from "./prompts.js";
-import { findTableMapping, TABLE_MAPPINGS } from "./tableMapping.js";
+import { findTableMapping, TABLE_MAPPINGS, filterFieldsByAuth } from "./tableMapping.js";
 
 dotenv.config();
 
 const app = express();
 const port = 3000;
+
+// Authorized users untuk debug mode
+const AUTHORIZED_USERS = {
+  'nur iswanto': {
+    password: '5553',
+    fullName: 'Nur Iswanto'
+  },
+  'fernando siboro': {
+    password: '4106',
+    fullName: 'Fernando Siboro'
+  },
+  'ah muh rojab': {
+    password: '4127',
+    fullName: 'Ah muh Rojab'
+  }
+};
 
 // Session storage untuk conversation history (in-memory)
 const sessions = new Map();
@@ -462,13 +478,24 @@ async function callAI(userMessage, sessionId = 'default', mode = 'internal') {
     let mappingInfo = null;
 
     // === AUTHENTICATION CHECK ===
-    // Check if user says "saya Nur Iswanto" (case insensitive)
-    if (userMessage.toLowerCase().includes('saya nur iswanto')) {
-      console.log("🔐 Auth request detected from Nur Iswanto");
-      session.authState = 'pending_password';
-      session.userName = 'Nur Iswanto';
+    // Check if user says "saya [nama authorized user]"
+    const lowerMessage = userMessage.toLowerCase();
+    let detectedUser = null;
 
-      const answer = "Halo Bapak Nur Iswanto! 👋\n\nUntuk mengaktifkan **Debug Mode**, silakan masukkan password Anda.\n\n🔑 Ketik password untuk melanjutkan.";
+    for (const [userName, userData] of Object.entries(AUTHORIZED_USERS)) {
+      if (lowerMessage.includes(`saya ${userName}`)) {
+        detectedUser = { userName, ...userData };
+        break;
+      }
+    }
+
+    if (detectedUser) {
+      console.log(`🔐 Auth request detected from ${detectedUser.fullName}`);
+      session.authState = 'pending_password';
+      session.userName = detectedUser.fullName;
+      session.userKey = detectedUser.userName;
+
+      const answer = `Halo Bapak ${detectedUser.fullName}! 👋\n\nUntuk mengaktifkan **Debug Mode**, silakan masukkan password Anda.\n\n🔑 Ketik password untuk melanjutkan.`;
 
       addToHistory(sessionId, 'user', userMessage);
       addToHistory(sessionId, 'assistant', answer);
@@ -478,8 +505,10 @@ async function callAI(userMessage, sessionId = 'default', mode = 'internal') {
 
     // Check if waiting for password
     if (session.authState === 'pending_password') {
-      if (userMessage.trim() === '5553') {
-        console.log("✅ Password correct - Debug mode activated");
+      const userConfig = AUTHORIZED_USERS[session.userKey];
+
+      if (userConfig && userMessage.trim() === userConfig.password) {
+        console.log(`✅ Password correct - Debug mode activated for ${session.userName}`);
         session.authState = 'authenticated';
         session.debugMode = true;
 
@@ -487,7 +516,8 @@ async function callAI(userMessage, sessionId = 'default', mode = 'internal') {
           `Sekarang setiap pertanyaan Anda akan menampilkan:\n` +
           `📊 **Datasource** - Tabel yang digunakan\n` +
           `🔍 **SQL Query** - Query yang dijalankan\n` +
-          `🗺️ **Mapping Info** - Lokasi mapping prompt\n\n` +
+          `🗺️ **Mapping Info** - Lokasi mapping prompt\n` +
+          `🔒 **Field Access** - Akses ke SEMUA field (termasuk yang sensitif)\n\n` +
           `Silakan bertanya sesuatu untuk melihat detail teknisnya!`;
 
         // Mask password in history
@@ -499,7 +529,7 @@ async function callAI(userMessage, sessionId = 'default', mode = 'internal') {
         console.log("❌ Wrong password");
         session.authState = 'none';
 
-        const answer = "❌ **Password Salah!**\n\nDebug mode tidak diaktifkan. Silakan coba lagi dengan mengatakan:\n\"saya Nur Iswanto\"";
+        const answer = `❌ **Password Salah!**\n\nDebug mode tidak diaktifkan. Silakan coba lagi dengan mengatakan:\n"saya ${session.userName}"`;
 
         // Mask wrong password in history
         addToHistory(sessionId, 'user', '****');
@@ -542,9 +572,23 @@ async function callAI(userMessage, sessionId = 'default', mode = 'internal') {
               try {
                 const detailResults = await queryDB(detailQuery);
                 if (detailResults && detailResults.length > 0) {
+                  // Get mapping info for this table
+                  const tableMapping = TABLE_MAPPINGS.find(m => m.tableName === fromTable);
+
+                  // Apply field filtering based on authentication status
+                  const isAuthenticated = session.authState === 'authenticated' && session.debugMode;
+                  const filteredData = tableMapping ?
+                    filterFieldsByAuth(tableMapping, detailResults, isAuthenticated) :
+                    detailResults;
+
+                  console.log(`🔒 Field filtering applied - Authenticated: ${isAuthenticated}`);
+                  if (!isAuthenticated && tableMapping && tableMapping.publicFields) {
+                    console.log(`   Visible fields: ${tableMapping.publicFields.join(', ')}`);
+                  }
+
                   dbResults = [{
                     type: 'ai_generated_query',
-                    data: detailResults,
+                    data: filteredData,
                     description: `Detail data from previous query`,
                     sql_query: detailQuery,
                     query_method: 'Follow-up Detail Query',
@@ -553,8 +597,6 @@ async function callAI(userMessage, sessionId = 'default', mode = 'internal') {
                   sqlQuery = detailQuery;
                   tableName = fromTable;
 
-                  // Get mapping info for this table
-                  const tableMapping = TABLE_MAPPINGS.find(m => m.tableName === fromTable);
                   if (tableMapping) {
                     mappingInfo = {
                       file: 'tableMapping.js',
@@ -593,6 +635,25 @@ async function callAI(userMessage, sessionId = 'default', mode = 'internal') {
         }
 
         dbResults = await searchDatabase(userMessage);
+
+        // Apply field filtering based on authentication status
+        if (dbResults.length > 0 && tableMapping) {
+          const isAuthenticated = session.authState === 'authenticated' && session.debugMode;
+
+          // Filter data in each result
+          dbResults = dbResults.map(result => {
+            if (result.type === 'ai_generated_query' && result.data && Array.isArray(result.data)) {
+              const filteredData = filterFieldsByAuth(tableMapping, result.data, isAuthenticated);
+              return { ...result, data: filteredData };
+            }
+            return result;
+          });
+
+          console.log(`🔒 Field filtering applied - Authenticated: ${isAuthenticated}`);
+          if (!isAuthenticated && tableMapping.publicFields) {
+            console.log(`   Visible fields: ${tableMapping.publicFields.join(', ')}`);
+          }
+        }
       }
 
       // Extract SQL query from dbResults if available

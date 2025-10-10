@@ -63,31 +63,71 @@ export const OBCARD_MAPPING = {
     'dokumentasi': 'ImageFinding'
   },
 
+  // Field restrictions - field yang boleh ditampilkan untuk user non-debug
+  publicFields: [
+    'TrackingNum',      // ID/Nomor tracking
+    'EmpName',          // Nama pembuat
+    'CreatedDate',      // Tanggal dibuat
+    'Department',       // Department
+    'Location'          // Lokasi
+  ],
+
+  // Restricted fields - hanya untuk mode debug
+  restrictedFields: [
+    'EmpID',            // Employee ID (sensitif)
+    'ImageFinding',     // Path/URL gambar (sensitif)
+    'ActionTaken',      // Tindakan yang diambil (internal)
+    'Status',           // Status internal
+    'ApprovedBy',       // Yang approve (internal)
+    'ClosedDate'        // Tanggal closed (internal)
+  ],
+
   // Deskripsi untuk AI
   description: 'Data observation card (kartu observasi keselamatan kerja)'
 };
 
 // Mapping untuk Employees (sudah ada, tapi kita standardize)
-export const EMPLOYEES_MAPPING = {
-  tableName: 'employees',
+// export const EMPLOYEES_MAPPING = {
+//   tableName: 'employees',
 
-  keywords: [
-    'karyawan', 'employee', 'pegawai', 'staff',
-    'pekerja', 'tenaga kerja', 'SDM'
-  ],
+//   keywords: [
+//     'karyawan', 'employee', 'pegawai', 'staff',
+//     'pekerja', 'tenaga kerja', 'SDM'
+//   ],
 
-  fieldAliases: {
-    'nama': 'name',
-    'badge': 'badgeId',
-    'departemen': 'department',
-    'jabatan': 'designation',
-    'email': 'email',
-    'jenis kelamin': 'gender',
-    'status': 'employmentStatus'
-  },
+//   fieldAliases: {
+//     'nama': 'name',
+//     'badge': 'badgeId',
+//     'departemen': 'department',
+//     'jabatan': 'designation',
+//     'email': 'email',
+//     'jenis kelamin': 'gender',
+//     'status': 'employmentStatus'
+//   },
 
-  description: 'Data karyawan perusahaan'
-};
+//   // Field restrictions - field yang boleh ditampilkan untuk user non-debug
+//   publicFields: [
+//     'name',             // Nama karyawan
+//     'department',       // Department
+//     'designation',      // Jabatan
+//     'gender',           // Jenis kelamin
+//     'employmentStatus'  // Status employment
+//   ],
+
+//   // Restricted fields - hanya untuk mode debug
+//   restrictedFields: [
+//     'badgeId',          // Badge ID (sensitif)
+//     'email',            // Email (sensitif)
+//     'phone',            // Telepon (sensitif)
+//     'address',          // Alamat (sensitif)
+//     'salary',           // Gaji (sangat sensitif)
+//     'bankAccount',      // Rekening bank (sangat sensitif)
+//     'employeeId',       // Employee ID (sensitif)
+//     'nik'               // NIK (sangat sensitif)
+//   ],
+
+//   description: 'Data karyawan perusahaan'
+// };
 
 // CONTOH: Mapping untuk tabel lain (tinggal copy paste dan sesuaikan)
 export const CUSTOM_TABLE_MAPPING = {
@@ -108,7 +148,7 @@ export const CUSTOM_TABLE_MAPPING = {
 // Export all mappings
 export const TABLE_MAPPINGS = [
   OBCARD_MAPPING,
-  EMPLOYEES_MAPPING,
+  // EMPLOYEES_MAPPING,
   // CUSTOM_TABLE_MAPPING, // Uncomment jika mau pakai
 ];
 
@@ -150,11 +190,50 @@ export function buildWhereClauseWithAlias(mapping, conditions) {
   return whereClauses.join(' AND ');
 }
 
+// Helper function untuk filter fields berdasarkan auth status
+export function filterFieldsByAuth(mapping, dataRows, isAuthenticated = false) {
+  // Jika authenticated (debug mode), tampilkan semua field
+  if (isAuthenticated) {
+    return dataRows;
+  }
+
+  // Jika tidak ada publicFields defined, tampilkan semua (backward compatibility)
+  if (!mapping.publicFields || mapping.publicFields.length === 0) {
+    return dataRows;
+  }
+
+  // Filter: hanya tampilkan publicFields
+  return dataRows.map(row => {
+    const filteredRow = {};
+    for (const field of mapping.publicFields) {
+      if (row.hasOwnProperty(field)) {
+        filteredRow[field] = row[field];
+      }
+    }
+    return filteredRow;
+  });
+}
+
+// Helper function untuk mendapatkan daftar fields yang difilter
+export function getFilteredFieldsList(mapping, isAuthenticated = false) {
+  if (isAuthenticated) {
+    return 'ALL FIELDS (Debug Mode Active)';
+  }
+
+  if (!mapping.publicFields || mapping.publicFields.length === 0) {
+    return 'All available fields';
+  }
+
+  return mapping.publicFields.join(', ');
+}
+
 export default {
   TABLE_MAPPINGS,
   OBCARD_MAPPING,
-  EMPLOYEES_MAPPING,
+  // EMPLOYEES_MAPPING,
   findTableMapping,
   translateFieldAlias,
-  buildWhereClauseWithAlias
+  buildWhereClauseWithAlias,
+  filterFieldsByAuth,
+  getFilteredFieldsList
 };
