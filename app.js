@@ -613,6 +613,11 @@ async function callAI(userMessage, sessionId = 'default', mode = 'internal') {
                               (userMessage.trim().toLowerCase().startsWith('yang ') ||
                                /^(tahun|bulan|year|month|department|gender)\s+/i.test(userMessage.trim()));
 
+      // Pattern 3: Entity substitution (alternative query)
+      // Examples: "kalau Khairul Bahri?", "bagaimana dengan John?", "how about Sarah?"
+      const entitySubstitutionPattern = /^(kalau|bagaimana dengan|bagaimana kalau|how about|what about)\s+(.+)\??$/i;
+      const isEntitySubstitution = entitySubstitutionPattern.test(userMessage.trim());
+
       // Check if there's a recent SQL query in history (last 6 messages)
       let hasRecentQuery = false;
       if (session.history.length >= 2) {
@@ -624,7 +629,124 @@ async function callAI(userMessage, sessionId = 'default', mode = 'internal') {
         }
       }
 
-      if ((isDetailRequest || (isShortFollowUp && hasRecentQuery)) && session.history.length >= 2) {
+      // === HANDLE ENTITY SUBSTITUTION ===
+      if (isEntitySubstitution && hasRecentQuery && session.history.length >= 2) {
+        console.log("🔄 Detected entity substitution - rewriting query with new entity");
+
+        // Extract new entity name from follow-up
+        const matchResult = userMessage.trim().match(entitySubstitutionPattern);
+        const newEntityName = matchResult ? matchResult[2].trim().replace(/\?+$/, '') : null;
+
+        if (newEntityName) {
+          console.log(`🎯 New entity: "${newEntityName}"`);
+
+          // Find previous USER question in history (not assistant response)
+          for (let i = session.history.length - 1; i >= Math.max(0, session.history.length - 6); i--) {
+            const msg = session.history[i];
+
+            // Look for user message that has sql_query metadata (meaning it was a database query)
+            if (msg.role === 'user' && i < session.history.length - 1) {
+              // Check if next message (assistant) has sql_query
+              const nextMsg = session.history[i + 1];
+              if (nextMsg && nextMsg.role === 'assistant' && nextMsg.sql_query) {
+                const previousUserQuestion = msg.content;
+                console.log(`📝 Found previous question: "${previousUserQuestion}"`);
+
+                // Use AI to rewrite the question with new entity
+                try {
+                  const rewritePrompt = `You are a query rewriter. Your job is to rewrite a question by replacing the entity (name) with a new one.
+
+Previous question: "${previousUserQuestion}"
+New entity name: "${newEntityName}"
+
+Task: Rewrite the previous question but replace the old name/entity with the new name "${newEntityName}".
+
+Examples:
+- Previous: "berikan informasi obcard atas nama Nur Iswanto"
+  New entity: "Khairul Bahri"
+  Rewritten: "berikan informasi obcard atas nama Khairul Bahri"
+
+- Previous: "How many observation cards for John Doe?"
+  New entity: "Sarah Smith"
+  Rewritten: "How many observation cards for Sarah Smith?"
+
+IMPORTANT RULES:
+1. Keep the same structure and intent of the question
+2. Only replace the entity/name, keep everything else the same
+3. Maintain the same language as the original question
+4. Return ONLY the rewritten question, nothing else
+
+Rewritten question:`;
+
+                  const result = await model.generateContent(rewritePrompt);
+                  const response = await result.response;
+                  const rewrittenQuestion = response.text().trim().replace(/^["']|["']$/g, ''); // Remove quotes
+
+                  console.log(`🤖 Rewritten question: "${rewrittenQuestion}"`);
+
+                  // Execute the rewritten question by recursively calling this function
+                  // but mark it so we don't infinite loop
+                  if (rewrittenQuestion && rewrittenQuestion.length > 0 && !session.isRewriting) {
+                    session.isRewriting = true;
+
+                    // Call searchDatabase with rewritten question
+                    const tableMapping = findTableMapping(rewrittenQuestion);
+
+                    if (tableMapping) {
+                      tableName = tableMapping.tableName;
+                      mappingInfo = {
+                        file: 'tableMapping.js',
+                        tableName: tableMapping.tableName,
+                        keywords: tableMapping.keywords,
+                        description: tableMapping.description,
+                        fieldAliases: tableMapping.fieldAliases
+                      };
+
+                      console.log(`🔄 Executing rewritten query for table: ${tableName}`);
+                      dbResults = await searchDatabase(rewrittenQuestion);
+
+                      // Apply field filtering
+                      if (dbResults.length > 0 && tableMapping) {
+                        const isAuthenticated = session.authState === 'authenticated' && session.debugMode;
+
+                        dbResults = dbResults.map(result => {
+                          if (result.type === 'ai_generated_query' && result.data && Array.isArray(result.data)) {
+                            const filteredData = filterFieldsByAuth(tableMapping, result.data, isAuthenticated);
+                            return { ...result, data: filteredData };
+                          }
+                          return result;
+                        });
+
+                        console.log(`🔒 Field filtering applied - Authenticated: ${isAuthenticated}`);
+                        if (!isAuthenticated && tableMapping.publicFields) {
+                          console.log(`   Visible fields: ${tableMapping.publicFields.join(', ')}`);
+                        }
+                      }
+
+                      // Extract SQL from results
+                      if (dbResults.length > 0) {
+                        const aiResult = dbResults.find(r => r.type === 'ai_generated_query');
+                        if (aiResult) {
+                          sqlQuery = aiResult.sql_query;
+                        }
+                      }
+
+                      mode = 'skip_search';
+                      session.isRewriting = false;
+                    }
+                  }
+                } catch (err) {
+                  console.log("⚠️ Error rewriting query:", err.message);
+                }
+
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      if ((isDetailRequest || (isShortFollowUp && hasRecentQuery)) && session.history.length >= 2 && mode !== 'skip_search') {
         console.log("🔄 Detected detail request - extracting context from previous query");
 
         // Look for previous SQL query in history
