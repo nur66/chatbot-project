@@ -670,11 +670,12 @@
             selectMode(chatMode);
         });
 
-        // ===== QUESTION HISTORY (Arrow Up/Down) =====
+        // ===== QUESTION HISTORY - Local Storage (Arrow Up/Down) =====
         let questionHistory = JSON.parse(localStorage.getItem('question_history') || '[]');
         let historyIndex = -1;
         let currentInput = '';
 
+        // Simpan Pertanyaan ke History
         function saveQuestionToHistory(question) {
             // Add to beginning of array
             questionHistory.unshift(question);

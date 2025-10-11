@@ -60,21 +60,31 @@ export const OBCARD_MAPPING = {
     'foto obcard': 'ImageFinding',
     'image': 'ImageFinding',
     'picture': 'ImageFinding',
-    'dokumentasi': 'ImageFinding'
+    'dokumentasi': 'ImageFinding',
+
+    // Date/Time fields
+    'tahun': 'Year',
+    'year': 'Year',
+    'bulan': 'Month',
+    'month': 'Month',
+    'tanggal': 'CreatedDate',
+    'date': 'CreatedDate'
   },
 
   // Field restrictions - field yang boleh ditampilkan untuk user non-debug
   publicFields: [
+    'EmpID',            // Employee ID (sensitif)
     'TrackingNum',      // ID/Nomor tracking
     'EmpName',          // Nama pembuat
-    'CreatedDate',      // Tanggal dibuat
-    'Department',       // Department
-    'Location'          // Lokasi
+    'Problem',          // Masalah yang ditemukan
+    'BeforeAction',     // Tindakan sebelum observasi
+    'Year',             // Tahun
+    'Month',            // Bulan
+    'last_synced_at'    // Terakhir sinkronisasi
   ],
 
   // Restricted fields - hanya untuk mode debug
   restrictedFields: [
-    'EmpID',            // Employee ID (sensitif)
     'ImageFinding',     // Path/URL gambar (sensitif)
     'ActionTaken',      // Tindakan yang diambil (internal)
     'Status',           // Status internal

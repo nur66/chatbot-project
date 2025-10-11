@@ -197,6 +197,65 @@ async function generateSQLFromQuestion(question, tableName = 'employees') {
   }
 }
 
+// Fungsi untuk parse follow-up filter menggunakan AI
+async function parseFollowUpFilter(followUpQuestion, tableMapping) {
+  try {
+    console.log(`🔍 Parsing follow-up filter: "${followUpQuestion}"`);
+
+    // Get available fields from mapping
+    const availableFields = tableMapping.fieldAliases ?
+      Object.entries(tableMapping.fieldAliases).map(([alias, field]) => `${alias} → ${field}`).join('\n') :
+      'No field aliases available';
+
+    const filterPrompt = `You are a SQL filter parser. Your job is to convert natural language filter conditions into SQL WHERE clause fragments.
+
+Available field mappings:
+${availableFields}
+
+Table: ${tableMapping.tableName}
+
+User's follow-up filter request: "${followUpQuestion}"
+
+Examples:
+- "yang tahun 2025 saja" → "Year = 2025"
+- "yang tahun 2024" → "Year = 2024"
+- "yang bulan januari" → "Month = 'January'"
+- "yang bulan 1" → "Month = '1'"
+- "yang department IT" → "Department = 'IT'"
+- "yang perempuan" → "Gender = 'Female'"
+
+IMPORTANT RULES:
+1. Return ONLY the WHERE condition (without "WHERE" keyword)
+2. Use exact column names from the field mappings
+3. If the field is numeric (like Year), don't use quotes
+4. If the field is text (like Month name), use single quotes
+5. If you cannot determine a valid condition, return "INVALID"
+
+Return ONLY the SQL condition, nothing else:`;
+
+    const result = await model.generateContent(filterPrompt);
+    const response = await result.response;
+    let condition = response.text().trim();
+
+    // Clean up response
+    condition = condition.replace(/```sql\n?/gi, '').replace(/```\n?/g, '').trim();
+
+    // Remove "WHERE" if AI accidentally included it
+    condition = condition.replace(/^WHERE\s+/i, '').trim();
+
+    console.log(`🤖 AI parsed filter condition: ${condition}`);
+
+    if (condition.toUpperCase() === 'INVALID' || condition.length === 0) {
+      return null;
+    }
+
+    return condition;
+  } catch (error) {
+    console.error("❌ Error parsing follow-up filter:", error.message);
+    return null;
+  }
+}
+
 // Fungsi untuk mencari data dari database berdasarkan pertanyaan
 async function searchDatabase(question) {
   try {
@@ -544,10 +603,28 @@ async function callAI(userMessage, sessionId = 'default', mode = 'internal') {
     if (mode === 'internal') {
       console.log("🔍 Mencari data dari database...");
 
-      // === DETECT FOLLOW-UP QUESTIONS FOR DETAIL DATA ===
-      const isDetailRequest = /^(siapa saja|tampilkan (daftarnya|namanya|semua|semuanya)|show (me )?(the )?(list|names|all)|who are they)\??$/i.test(userMessage.trim());
+      // === DETECT FOLLOW-UP QUESTIONS FOR DETAIL DATA OR FILTERING ===
+      // Pattern 1: Explicit detail request (exact match)
+      const isDetailRequest = /^(siapa saja|tampilkan (daftarnya|namanya|semua|semuanya|detailnya|detail)|show (me )?(the )?(list|names|all|details?)|who are they)\??$/i.test(userMessage.trim());
 
-      if (isDetailRequest && session.history.length >= 2) {
+      // Pattern 2: Short follow-up with filter (flexible)
+      // Examples: "yang tahun 2025", "yang tahun 2025 saja", "tahun 2024"
+      const isShortFollowUp = userMessage.trim().length < 50 &&
+                              (userMessage.trim().toLowerCase().startsWith('yang ') ||
+                               /^(tahun|bulan|year|month|department|gender)\s+/i.test(userMessage.trim()));
+
+      // Check if there's a recent SQL query in history (last 6 messages)
+      let hasRecentQuery = false;
+      if (session.history.length >= 2) {
+        for (let i = session.history.length - 1; i >= Math.max(0, session.history.length - 6); i--) {
+          if (session.history[i].sql_query) {
+            hasRecentQuery = true;
+            break;
+          }
+        }
+      }
+
+      if ((isDetailRequest || (isShortFollowUp && hasRecentQuery)) && session.history.length >= 2) {
         console.log("🔄 Detected detail request - extracting context from previous query");
 
         // Look for previous SQL query in history
@@ -562,11 +639,31 @@ async function callAI(userMessage, sessionId = 'default', mode = 'internal') {
             const tableMatch = previousSQL.match(/FROM\s+(\w+)/i);
 
             if (whereMatch && tableMatch) {
-              const whereClause = whereMatch[1].trim();
+              let whereClause = whereMatch[1].trim();
               const fromTable = tableMatch[1];
 
-              // Generate new query to get detail data
-              const detailQuery = `SELECT TOP 50 * FROM ${fromTable} WHERE ${whereClause} ORDER BY name`;
+              // Check if this is a filter follow-up (not just detail request)
+              if (isShortFollowUp && !isDetailRequest) {
+                console.log("🎯 Detected filter follow-up - parsing additional conditions");
+
+                // Get table mapping for AI filter parsing
+                const tableMapping = TABLE_MAPPINGS.find(m => m.tableName === fromTable);
+
+                if (tableMapping) {
+                  // Use AI to parse the follow-up filter
+                  const additionalCondition = await parseFollowUpFilter(userMessage, tableMapping);
+
+                  if (additionalCondition) {
+                    console.log(`✅ Adding filter condition: ${additionalCondition}`);
+                    whereClause = `${whereClause} AND ${additionalCondition}`;
+                  } else {
+                    console.log("⚠️ Could not parse filter condition, using original WHERE clause");
+                  }
+                }
+              }
+
+              // Generate new query to get detail data (without ORDER BY to avoid column name issues)
+              const detailQuery = `SELECT TOP 50 * FROM ${fromTable} WHERE ${whereClause}`;
               console.log("🔄 Re-querying with details:", detailQuery);
 
               try {
