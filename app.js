@@ -280,16 +280,24 @@ async function searchDatabase(question) {
           const aiResults = await queryDB(aiGeneratedSQL);
           console.log("🔎 [DEBUG] Query results count:", aiResults ? aiResults.length : 0);
 
-          // Check if this is a COUNT(*) query with 0 results
-          const isCountQuery = aiGeneratedSQL.toUpperCase().includes('COUNT(');
+          // Check if this is a simple COUNT(*) query with 0 results
+          // Only check for simple COUNT queries WITHOUT GROUP BY
+          const isSimpleCountQuery = aiGeneratedSQL.toUpperCase().includes('COUNT(') &&
+                                     !aiGeneratedSQL.toUpperCase().includes('GROUP BY');
           let hasResults = aiResults && aiResults.length > 0;
 
-          if (isCountQuery && hasResults) {
-            // For COUNT queries, check the actual count value
+          if (isSimpleCountQuery && hasResults) {
+            // For simple COUNT queries (no GROUP BY), check the actual count value
             const firstRow = aiResults[0];
-            const countValue = Object.values(firstRow)[0]; // Get first column value
-            console.log("🔎 [DEBUG] COUNT query result value:", countValue);
-            hasResults = countValue > 0;
+
+            // Find the COUNT column (usually first column or named column)
+            const countValue = Object.values(firstRow)[0];
+            console.log("🔎 [DEBUG] Simple COUNT query result value:", countValue);
+
+            // Only consider it zero results if the count is actually numeric and = 0
+            if (typeof countValue === 'number' && countValue === 0) {
+              hasResults = false;
+            }
           }
 
           if (hasResults) {
