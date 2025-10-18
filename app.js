@@ -20,6 +20,10 @@ import {
   validateSessionId,
   validateMode
 } from "./security.js";
+import {
+  detectFollowupQuestion,
+  buildContextAwareQuery
+} from "./contextPatterns.js";
 
 dotenv.config();
 
@@ -645,6 +649,24 @@ async function callAI(userMessage, sessionId = 'default', mode = 'internal') {
     }
 
     // === NORMAL FLOW ===
+    // 0. CONTEXT-AWARE REWRITING: Check if this is a follow-up question
+    let processedMessage = sanitizedMessage;
+    const followupDetection = detectFollowupQuestion(sanitizedMessage);
+
+    if (followupDetection) {
+      console.log(`🔍 [CONTEXT] Follow-up detected: ${followupDetection.type}`);
+
+      // Build context-aware query using conversation history
+      const enhancedQuery = buildContextAwareQuery(sanitizedMessage, session.history);
+
+      if (enhancedQuery !== sanitizedMessage) {
+        console.log(`🔄 [CONTEXT] Question rewritten: "${sanitizedMessage}" → "${enhancedQuery}"`);
+        processedMessage = enhancedQuery;
+      } else {
+        console.log(`⚠️ [CONTEXT] Could not rewrite follow-up question - using original`);
+      }
+    }
+
     // 1. Cari data dari database hanya jika mode internal
     if (mode === 'internal') {
       console.log("🔍 Mencari data dari database...");
@@ -887,7 +909,7 @@ Rewritten question:`;
 
       if (mode !== 'skip_search') {
         // Get table mapping info for debug mode
-        const tableMapping = findTableMapping(sanitizedMessage);
+        const tableMapping = findTableMapping(processedMessage);
         if (tableMapping) {
           tableName = tableMapping.tableName;
           mappingInfo = {
@@ -899,7 +921,7 @@ Rewritten question:`;
           };
         }
 
-        dbResults = await searchDatabase(sanitizedMessage, session);
+        dbResults = await searchDatabase(processedMessage, session);
 
         // Apply field filtering based on authentication status
         // BUT skip filtering for COUNT queries (they have empty column names)
@@ -989,7 +1011,7 @@ Rewritten question:`;
 
     // 3. Buat prompt menggunakan modular system (dengan mode parameter)
     const originalMode = mode === 'skip_search' ? 'internal' : mode; // Restore original mode for prompt
-    const contextPrompt = buildAnswerPrompt(sanitizedMessage, dbResults, conversationContext, originalMode, countSummary);
+    const contextPrompt = buildAnswerPrompt(processedMessage, dbResults, conversationContext, originalMode, countSummary);
 
     if (conversationContext) {
       console.log("💭 Menggunakan conversation history untuk konteks");
