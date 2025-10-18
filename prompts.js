@@ -67,16 +67,31 @@ INSTRUCTIONS:
 9. For text searches with names, use LIKE with wildcards and be flexible with spacing
 10. Maximum 100 rows for safety (TOP 100)
 
+AGGREGATION FUNCTIONS (detect from question keywords):
+- COUNT DISTINCT: For "unique", "distinct", "unik", "berbeda" → SELECT COUNT(DISTINCT column)
+- AVG: For "rata-rata", "average", "mean" → SELECT AVG(column)
+- SUM: For "total nilai", "sum", "jumlah nilai" → SELECT SUM(column)
+- MIN: For "terkecil", "minimum", "paling awal", "earliest", "oldest" → SELECT MIN(column)
+- MAX: For "terbesar", "maximum", "paling baru", "latest", "newest" → SELECT MAX(column)
+- GROUP BY: For "per", "by", "breakdown", "setiap", "masing-masing" → SELECT column, COUNT(*) GROUP BY column
+
 CRITICAL RULES:
 - If question asks "berapa total X" or "how many X", use: SELECT COUNT(*) FROM TableName WHERE conditions
+- If question asks "berapa total DISTINCT X" or "berapa X unik", use: SELECT COUNT(DISTINCT column) FROM TableName
+- If table description mentions "use COUNT DISTINCT", apply COUNT(DISTINCT column) for unique counts
 - NEVER use SUM() for counting - use COUNT(*)
 - NEVER invent column names not in the schema
 - For name searches, use: WHERE ColumnName LIKE '%FirstName%LastName%' OR ColumnName LIKE '%FirstName LastName%'
 
 EXAMPLES:
 - "Berapa total obcard?" → SELECT COUNT(*) FROM RecordOBCard
+- "Berapa total department?" → SELECT COUNT(DISTINCT department) FROM employees
+- "Berapa karyawan per department?" → SELECT department, COUNT(*) as jumlah FROM employees GROUP BY department
+- "Rata-rata salary karyawan?" → SELECT AVG(salary) FROM employees
 - "Berapa obcard atas nama Nur Iswanto?" → SELECT COUNT(*) FROM RecordOBCard WHERE EmpName LIKE '%Nur%Iswanto%' OR EmpName LIKE '%Nur Iswanto%'
 - "Tampilkan obcard yang ada bukti fotonya" → SELECT TOP 100 * FROM RecordOBCard WHERE ImageFinding IS NOT NULL AND ImageFinding != ''
+- "10 obcard terbaru" → SELECT TOP 10 * FROM RecordOBCard ORDER BY CreatedDate DESC
+- "Karyawan yang paling awal join" → SELECT TOP 1 * FROM employees ORDER BY joinDate ASC
 
 IMPORTANT: Return ONLY the SQL query, nothing else. No markdown, no code blocks, just pure SQL.
 

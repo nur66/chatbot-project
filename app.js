@@ -960,7 +960,12 @@ Rewritten question:`;
     if (dbResults.length > 0) {
       console.log(`🔎 [DEBUG] PRE-PROCESS: dbResults[0] type = ${dbResults[0].type}`);
       console.log(`🔎 [DEBUG] PRE-PROCESS: dbResults[0].data exists = ${!!dbResults[0].data}`);
-      console.log(`🔎 [DEBUG] PRE-PROCESS: dbResults[0].data =`, JSON.stringify(dbResults[0].data).substring(0, 200));
+      if (dbResults[0].data) {
+        const dataStr = JSON.stringify(dbResults[0].data);
+        console.log(`🔎 [DEBUG] PRE-PROCESS: dbResults[0].data =`, dataStr.substring(0, Math.min(200, dataStr.length)));
+      } else {
+        console.log(`🔎 [DEBUG] PRE-PROCESS: dbResults[0].data = undefined (access denied or no data)`);
+      }
     }
 
     let countSummary = null;

@@ -346,20 +346,36 @@ export const EMPLOYEES_MAPPING = {
   description: 'Data karyawan perusahaan (restricted access)'
 };
 
-// CONTOH: Mapping untuk tabel lain (tinggal copy paste dan sesuaikan)
-export const CUSTOM_TABLE_MAPPING = {
-  tableName: 'YourTableName',
+// Mapping untuk Department (query ke table employees tapi focus ke department)
+export const DEPARTMENT_MAPPING = {
+  tableName: 'employees',
 
+  // Keywords yang trigger tabel ini
   keywords: [
-    'keyword1', 'keyword2', 'keyword3'
+    // Harus spesifik agar tidak clash dengan EMPLOYEES_MAPPING
+    'total department', 'jumlah department', 'berapa department',
+    'list department', 'daftar department', 'semua department',
+    'count department', 'hitung department',
+    'total dept', 'jumlah dept', 'berapa dept',
+    'total divisi', 'jumlah divisi', 'berapa divisi'
   ],
 
   fieldAliases: {
-    'alias1': 'RealColumnName1',
-    'alias2': 'RealColumnName2'
+    'department': 'department',
+    'dept': 'department',
+    'divisi': 'department',
+    'departemen': 'department',
   },
 
-  description: 'Deskripsi tabel ini'
+  // Public fields
+  publicFields: [
+    'department'
+  ],
+
+  // Require special access (same as employees)
+  requiresSpecialAccess: true,
+
+  description: 'Data department/divisi perusahaan (query distinct dari employees table)'
 };
 
 // Export all mappings
@@ -367,7 +383,7 @@ export const TABLE_MAPPINGS = [
   OBCARD_MAPPING,
   TICKETING_MAPPING,
   EMPLOYEES_MAPPING,  // Enabled with access control
-  // CUSTOM_TABLE_MAPPING, // Uncomment jika mau pakai
+  DEPARTMENT_MAPPING,
 ];
 
 // Helper function untuk find mapping by keyword
@@ -450,6 +466,7 @@ export default {
   OBCARD_MAPPING,
   TICKETING_MAPPING,
   EMPLOYEES_MAPPING,
+  DEPARTMENT_MAPPING,
   findTableMapping,
   translateFieldAlias,
   buildWhereClauseWithAlias,
