@@ -7,27 +7,27 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { connectDB, queryDB, getTableSchema, getSampleData } from "./db.js";
 import { buildSQLGenerationPrompt, buildAnswerPrompt } from "./prompts.js";
 import { findTableMapping, TABLE_MAPPINGS, filterFieldsByAuth } from "./tableMapping.js";
+import {
+  AUTHORIZED_USERS,
+  checkTableAccess,
+  checkEmployeeAccessBySession
+} from "./userAccess.js";
+import {
+  validateSQLQuery,
+  sanitizeUserInput,
+  removeDebugInfo,
+  checkRateLimit,
+  validateSessionId,
+  validateMode
+} from "./security.js";
 
 dotenv.config();
 
 const app = express();
 const port = 3000;
 
-// Authorized users untuk debug mode
-const AUTHORIZED_USERS = {
-  'nur iswanto': {
-    password: '5553',
-    fullName: 'Nur Iswanto'
-  },
-  'fernando siboro': {
-    password: '4106',
-    fullName: 'Fernando Siboro'
-  },
-  'ah muh rojab': {
-    password: '4127',
-    fullName: 'Ah muh Rojab'
-  }
-};
+// Authorized users imported from userAccess.js
+// To add new users or manage employee access, edit userAccess.js
 
 // Session storage untuk conversation history (in-memory)
 const sessions = new Map();
@@ -190,6 +190,15 @@ async function generateSQLFromQuestion(question, tableName = 'employees') {
 
     console.log("🤖 AI Generated SQL:", sqlQuery);
 
+    // SECURITY: Validate SQL query before returning
+    const validation = validateSQLQuery(sqlQuery);
+    if (!validation.isValid) {
+      console.error(`❌ SQL Validation Failed: ${validation.error}`);
+      console.error(`   Rejected SQL: ${sqlQuery}`);
+      return null; // Return null untuk prevent malicious query execution
+    }
+
+    console.log("✅ SQL Validation Passed");
     return sqlQuery;
   } catch (error) {
     console.error("❌ Error generating SQL:", error.message);
@@ -257,7 +266,7 @@ Return ONLY the SQL condition, nothing else:`;
 }
 
 // Fungsi untuk mencari data dari database berdasarkan pertanyaan
-async function searchDatabase(question) {
+async function searchDatabase(question, session = null) {
   try {
     console.log("🔎 [DEBUG] searchDatabase called with:", question);
     const lowerQuestion = question.toLowerCase();
@@ -269,6 +278,24 @@ async function searchDatabase(question) {
 
     if (tableMapping) {
       console.log(`🎯 Detected table: ${tableMapping.tableName}`);
+
+      // SECURITY: Check table access permissions
+      if (session) {
+        const accessCheck = checkTableAccess(tableMapping.tableName, session);
+        if (!accessCheck.hasAccess) {
+          console.log(`🔒 Access denied for table: ${tableMapping.tableName}`);
+          // Return access denied message as db result
+          dbResults.push({
+            type: 'access_denied',
+            table_name: tableMapping.tableName,
+            message: accessCheck.message,
+            description: 'Access restricted'
+          });
+          return dbResults;
+        }
+        console.log(`✅ Access granted for table: ${tableMapping.tableName}`);
+      }
+
       console.log("🧠 Menggunakan AI untuk generate SQL query...");
 
       const aiGeneratedSQL = await generateSQLFromQuestion(question, tableMapping.tableName);
@@ -538,6 +565,17 @@ async function callAI(userMessage, sessionId = 'default', mode = 'internal') {
   try {
     console.log(`🔄 Mode: ${mode}`);
 
+    // SECURITY: Sanitize user input
+    const sanitization = sanitizeUserInput(userMessage);
+    if (!sanitization.isValid) {
+      console.error(`❌ Input Validation Failed: ${sanitization.error}`);
+      return `Maaf, input Anda mengandung karakter atau pola yang tidak diperbolehkan. Silakan coba lagi dengan input yang valid.`;
+    }
+
+    // Use sanitized input for all processing
+    const sanitizedMessage = sanitization.sanitized;
+    console.log(`✅ Input sanitized`);
+
     const session = getOrCreateSession(sessionId);
     let dbResults = [];
     let sqlQuery = null;
@@ -546,7 +584,7 @@ async function callAI(userMessage, sessionId = 'default', mode = 'internal') {
 
     // === AUTHENTICATION CHECK ===
     // Check if user says "saya [nama authorized user]"
-    const lowerMessage = userMessage.toLowerCase();
+    const lowerMessage = sanitizedMessage.toLowerCase();
     let detectedUser = null;
 
     for (const [userName, userData] of Object.entries(AUTHORIZED_USERS)) {
@@ -574,7 +612,7 @@ async function callAI(userMessage, sessionId = 'default', mode = 'internal') {
     if (session.authState === 'pending_password') {
       const userConfig = AUTHORIZED_USERS[session.userKey];
 
-      if (userConfig && userMessage.trim() === userConfig.password) {
+      if (userConfig && sanitizedMessage.trim() === userConfig.password) {
         console.log(`✅ Password correct - Debug mode activated for ${session.userName}`);
         session.authState = 'authenticated';
         session.debugMode = true;
@@ -613,18 +651,18 @@ async function callAI(userMessage, sessionId = 'default', mode = 'internal') {
 
       // === DETECT FOLLOW-UP QUESTIONS FOR DETAIL DATA OR FILTERING ===
       // Pattern 1: Explicit detail request (exact match)
-      const isDetailRequest = /^(siapa saja|tampilkan (daftarnya|namanya|semua|semuanya|detailnya|detail)|show (me )?(the )?(list|names|all|details?)|who are they)\??$/i.test(userMessage.trim());
+      const isDetailRequest = /^(siapa saja|tampilkan (daftarnya|namanya|semua|semuanya|detailnya|detail)|show (me )?(the )?(list|names|all|details?)|who are they)\??$/i.test(sanitizedMessage.trim());
 
       // Pattern 2: Short follow-up with filter (flexible)
       // Examples: "yang tahun 2025", "yang tahun 2025 saja", "tahun 2024"
-      const isShortFollowUp = userMessage.trim().length < 50 &&
-                              (userMessage.trim().toLowerCase().startsWith('yang ') ||
-                               /^(tahun|bulan|year|month|department|gender)\s+/i.test(userMessage.trim()));
+      const isShortFollowUp = sanitizedMessage.trim().length < 50 &&
+                              (sanitizedMessage.trim().toLowerCase().startsWith('yang ') ||
+                               /^(tahun|bulan|year|month|department|gender)\s+/i.test(sanitizedMessage.trim()));
 
       // Pattern 3: Entity substitution (alternative query)
       // Examples: "kalau Khairul Bahri?", "bagaimana dengan John?", "how about Sarah?"
       const entitySubstitutionPattern = /^(kalau|bagaimana dengan|bagaimana kalau|how about|what about)\s+(.+)\??$/i;
-      const isEntitySubstitution = entitySubstitutionPattern.test(userMessage.trim());
+      const isEntitySubstitution = entitySubstitutionPattern.test(sanitizedMessage.trim());
 
       // Check if there's a recent SQL query in history (last 6 messages)
       let hasRecentQuery = false;
@@ -642,7 +680,7 @@ async function callAI(userMessage, sessionId = 'default', mode = 'internal') {
         console.log("🔄 Detected entity substitution - rewriting query with new entity");
 
         // Extract new entity name from follow-up
-        const matchResult = userMessage.trim().match(entitySubstitutionPattern);
+        const matchResult = sanitizedMessage.trim().match(entitySubstitutionPattern);
         const newEntityName = matchResult ? matchResult[2].trim().replace(/\?+$/, '') : null;
 
         if (newEntityName) {
@@ -711,7 +749,7 @@ Rewritten question:`;
                       };
 
                       console.log(`🔄 Executing rewritten query for table: ${tableName}`);
-                      dbResults = await searchDatabase(rewrittenQuestion);
+                      dbResults = await searchDatabase(rewrittenQuestion, session);
 
                       // Apply field filtering
                       if (dbResults.length > 0 && tableMapping) {
@@ -781,7 +819,7 @@ Rewritten question:`;
 
                 if (tableMapping) {
                   // Use AI to parse the follow-up filter
-                  const additionalCondition = await parseFollowUpFilter(userMessage, tableMapping);
+                  const additionalCondition = await parseFollowUpFilter(sanitizedMessage, tableMapping);
 
                   if (additionalCondition) {
                     console.log(`✅ Adding filter condition: ${additionalCondition}`);
@@ -849,7 +887,7 @@ Rewritten question:`;
 
       if (mode !== 'skip_search') {
         // Get table mapping info for debug mode
-        const tableMapping = findTableMapping(userMessage);
+        const tableMapping = findTableMapping(sanitizedMessage);
         if (tableMapping) {
           tableName = tableMapping.tableName;
           mappingInfo = {
@@ -861,24 +899,40 @@ Rewritten question:`;
           };
         }
 
-        dbResults = await searchDatabase(userMessage);
+        dbResults = await searchDatabase(sanitizedMessage, session);
 
         // Apply field filtering based on authentication status
+        // BUT skip filtering for COUNT queries (they have empty column names)
         if (dbResults.length > 0 && tableMapping) {
           const isAuthenticated = session.authState === 'authenticated' && session.debugMode;
 
-          // Filter data in each result
+          // Check if this is a COUNT query result
+          let isCountQuery = false;
+          if (dbResults[0].sql_query) {
+            const sql = dbResults[0].sql_query.toUpperCase();
+            isCountQuery = sql.includes('COUNT(') && !sql.includes('GROUP BY');
+          }
+
+          // Filter data in each result (SKIP for COUNT queries)
           dbResults = dbResults.map(result => {
             if (result.type === 'ai_generated_query' && result.data && Array.isArray(result.data)) {
+              // Skip field filtering for COUNT queries
+              if (isCountQuery) {
+                console.log(`⏭️ Skipping field filtering for COUNT query`);
+                return result; // Keep original data
+              }
+
               const filteredData = filterFieldsByAuth(tableMapping, result.data, isAuthenticated);
               return { ...result, data: filteredData };
             }
             return result;
           });
 
-          console.log(`🔒 Field filtering applied - Authenticated: ${isAuthenticated}`);
-          if (!isAuthenticated && tableMapping.publicFields) {
-            console.log(`   Visible fields: ${tableMapping.publicFields.join(', ')}`);
+          if (!isCountQuery) {
+            console.log(`🔒 Field filtering applied - Authenticated: ${isAuthenticated}`);
+            if (!isAuthenticated && tableMapping.publicFields) {
+              console.log(`   Visible fields: ${tableMapping.publicFields.join(', ')}`);
+            }
           }
         }
       }
@@ -901,9 +955,36 @@ Rewritten question:`;
     // 2. Ambil conversation context dari session
     const conversationContext = getConversationContext(sessionId, 3);
 
+    // 2.5. PRE-PROCESS: Extract COUNT result for AI
+    console.log(`🔎 [DEBUG] PRE-PROCESS: dbResults.length = ${dbResults.length}`);
+    if (dbResults.length > 0) {
+      console.log(`🔎 [DEBUG] PRE-PROCESS: dbResults[0] type = ${dbResults[0].type}`);
+      console.log(`🔎 [DEBUG] PRE-PROCESS: dbResults[0].data exists = ${!!dbResults[0].data}`);
+      console.log(`🔎 [DEBUG] PRE-PROCESS: dbResults[0].data =`, JSON.stringify(dbResults[0].data).substring(0, 200));
+    }
+
+    let countSummary = null;
+    if (dbResults.length > 0 && dbResults[0].data && Array.isArray(dbResults[0].data) && dbResults[0].data.length > 0) {
+      const firstRow = dbResults[0].data[0];
+      console.log(`🔎 [DEBUG] PRE-PROCESS: firstRow =`, JSON.stringify(firstRow));
+      const values = Object.values(firstRow);
+      console.log(`🔎 [DEBUG] PRE-PROCESS: values =`, values, `length = ${values.length}, type of first = ${typeof values[0]}`);
+
+      // Check if it's a simple COUNT result (single numeric value)
+      if (values.length === 1 && typeof values[0] === 'number') {
+        countSummary = {
+          value: values[0],
+          type: 'count'
+        };
+        console.log(`🔢 COUNT result extracted: ${countSummary.value}`);
+      } else {
+        console.log(`🔎 [DEBUG] PRE-PROCESS: Not a COUNT result (values.length=${values.length}, type=${typeof values[0]})`);
+      }
+    }
+
     // 3. Buat prompt menggunakan modular system (dengan mode parameter)
     const originalMode = mode === 'skip_search' ? 'internal' : mode; // Restore original mode for prompt
-    const contextPrompt = buildAnswerPrompt(userMessage, dbResults, conversationContext, originalMode);
+    const contextPrompt = buildAnswerPrompt(sanitizedMessage, dbResults, conversationContext, originalMode, countSummary);
 
     if (conversationContext) {
       console.log("💭 Menggunakan conversation history untuk konteks");
@@ -981,6 +1062,8 @@ app.get("/", (req, res) => {
 
 app.post("/api/chat", async (req, res) => {
   const { question, sessionId, mode } = req.body;
+
+  // SECURITY: Validate required fields
   if (!question) {
     return res.status(400).json({ error: "Question is required" });
   }
@@ -989,13 +1072,50 @@ app.post("/api/chat", async (req, res) => {
   const session = sessionId || 'default';
   const chatMode = mode || 'internal'; // Default ke internal
 
+  // SECURITY: Validate sessionId format
+  if (!validateSessionId(session)) {
+    return res.status(400).json({
+      error: "Invalid session ID format. Use alphanumeric characters, hyphens, or underscores (3-100 characters)."
+    });
+  }
+
+  // SECURITY: Validate mode
+  if (!validateMode(chatMode)) {
+    return res.status(400).json({
+      error: "Invalid mode. Use 'internal' or 'external'."
+    });
+  }
+
+  // SECURITY: Rate limiting (30 requests per minute per session)
+  const rateLimit = checkRateLimit(session, 30, 60000);
+  if (!rateLimit.allowed) {
+    const resetTime = new Date(rateLimit.resetAt).toLocaleTimeString();
+    return res.status(429).json({
+      error: `Rate limit exceeded. Please try again after ${resetTime}.`,
+      retryAfter: Math.ceil((rateLimit.resetAt - Date.now()) / 1000)
+    });
+  }
+
   try {
     console.log(`\n💬 User [${session}] [Mode: ${chatMode}]:`, question);
     const answer = await callAI(question, session, chatMode);
-    console.log("🤖 AI:", answer.substring(0, 100) + "...\n");
-    res.json({ answer, sessionId: session });
+
+    // Safe logging with substring (handle undefined/null)
+    if (answer && typeof answer === 'string') {
+      console.log("🤖 AI:", answer.substring(0, Math.min(100, answer.length)) + "...\n");
+    } else {
+      console.log("🤖 AI: [No response generated]\n");
+    }
+
+    // SECURITY: Remove debug info for non-authenticated users
+    const sessionObj = sessions.get(session);
+    const isAuthenticated = sessionObj && sessionObj.authState === 'authenticated' && sessionObj.debugMode;
+    const cleanAnswer = removeDebugInfo(answer, isAuthenticated);
+
+    res.json({ answer: cleanAnswer, sessionId: session });
   } catch (error) {
     console.error("❌ Error:", error.message);
+    console.error("❌ Stack:", error.stack);
     res.status(500).json({ error: "Maaf, terjadi kesalahan saat memproses permintaan Anda." });
   }
 });

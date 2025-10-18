@@ -292,6 +292,60 @@ export const TICKETING_MAPPING = {
   description: 'Data laporan ticketing management system IT (weekly reports)'
 };
 
+// Mapping untuk Employees
+// SPECIAL ACCESS: Hanya user tertentu yang bisa mengakses tabel ini
+// Lihat userAccess.js untuk konfigurasi access control
+export const EMPLOYEES_MAPPING = {
+  tableName: 'employees',
+
+  keywords: [
+    'karyawan', 'employee', 'pegawai', 'staff',
+    'pekerja', 'tenaga kerja', 'SDM', 'human resource'
+  ],
+
+  fieldAliases: {
+    'nama': 'name',
+    'badge': 'badgeId',
+    'departemen': 'department',
+    'jabatan': 'designation',
+    'email': 'email',
+    'jenis kelamin': 'gender',
+    'status': 'employmentStatus',
+    'section': 'section',
+    'join date': 'joinDate',
+    'tanggal join': 'joinDate',
+    'tanggal masuk': 'joinDate'
+  },
+
+  // Field restrictions - field yang boleh ditampilkan untuk user non-debug
+  publicFields: [
+    'name',             // Nama karyawan
+    'department',       // Department
+    'designation',      // Jabatan
+    'gender',           // Jenis kelamin
+    'employmentStatus', // Status employment
+    'section',          // Section
+    'joinDate'          // Tanggal join
+  ],
+
+  // Restricted fields - hanya untuk mode debug
+  restrictedFields: [
+    'badgeId',          // Badge ID (sensitif)
+    'email',            // Email (sensitif)
+    'phone',            // Telepon (sensitif)
+    'address',          // Alamat (sensitif)
+    'salary',           // Gaji (sangat sensitif)
+    'bankAccount',      // Rekening bank (sangat sensitif)
+    'employeeId',       // Employee ID (sensitif)
+    'nik'               // NIK (sangat sensitif)
+  ],
+
+  // Require special access (check in userAccess.js)
+  requiresSpecialAccess: true,
+
+  description: 'Data karyawan perusahaan (restricted access)'
+};
+
 // CONTOH: Mapping untuk tabel lain (tinggal copy paste dan sesuaikan)
 export const CUSTOM_TABLE_MAPPING = {
   tableName: 'YourTableName',
@@ -312,7 +366,7 @@ export const CUSTOM_TABLE_MAPPING = {
 export const TABLE_MAPPINGS = [
   OBCARD_MAPPING,
   TICKETING_MAPPING,
-  // EMPLOYEES_MAPPING,
+  EMPLOYEES_MAPPING,  // Enabled with access control
   // CUSTOM_TABLE_MAPPING, // Uncomment jika mau pakai
 ];
 
@@ -395,7 +449,7 @@ export default {
   TABLE_MAPPINGS,
   OBCARD_MAPPING,
   TICKETING_MAPPING,
-  // EMPLOYEES_MAPPING,
+  EMPLOYEES_MAPPING,
   findTableMapping,
   translateFieldAlias,
   buildWhereClauseWithAlias,

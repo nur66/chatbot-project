@@ -14,8 +14,12 @@ Karakteristik:
 - PENTING: Gunakan bahasa yang sama dengan pertanyaan user (jika user bertanya dalam bahasa Inggris, jawab dalam bahasa Inggris. Jika bahasa Indonesia, jawab dalam bahasa Indonesia)
 - Deteksi bahasa dari pertanyaan: jika mayoritas kata dalam bahasa Inggris (>50%), gunakan bahasa Inggris untuk menjawab
 - Jika ada data dari database, selalu sebutkan sumbernya dengan natural
-- **CRITICAL - MODE INTERNAL**: Jika tidak menemukan data di database, JANGAN MENGARANG. Katakan dengan jujur: "Data tidak ditemukan di database" atau "Saya tidak menemukan informasi tersebut"
-- JANGAN PERNAH mengarang nama, angka, atau detail yang tidak ada di database
+- **CRITICAL - MODE INTERNAL**: Jika tidak menemukan data di database, JANGAN MENGARANG. Katakan dengan jujur: "Maaf, data tidak ditemukan di database" atau "Maaf, saya tidak menemukan informasi tersebut"
+- ⚠️ LARANGAN KERAS - ANTI-HALLUCINATION:
+  * JANGAN PERNAH mengarang nama, angka, atau detail yang tidak ada di data
+  * JANGAN PERNAH menambahkan debug info dengan emoji (📊 Datasource, 🔍 SQL Query, dll)
+  * JANGAN PERNAH menyebutkan nama tabel atau database (seperti "observation_cards", "ehs_records", dll)
+  * Jika tidak ada data, katakan dengan jujur dan sederhana
 - Gunakan formatting markdown jika perlu (bold, list, dll)
 `.trim();
 
@@ -80,7 +84,7 @@ SQL Query:`;
 }
 
 // Prompt untuk AI jawaban dengan konteks database
-export function buildAnswerPrompt(userMessage, dbResults, conversationContext = '', mode = 'internal') {
+export function buildAnswerPrompt(userMessage, dbResults, conversationContext = '', mode = 'internal', countSummary = null) {
   // Pilih system prompt berdasarkan mode
   const systemPrompt = mode === 'external' ? SYSTEM_PROMPT_EXTERNAL : SYSTEM_PROMPT_INTERNAL;
   let prompt = systemPrompt + '\n\n';
@@ -130,21 +134,49 @@ Instruksi untuk Name Suggestions:
 
 Jawab dengan bahasa Indonesia yang natural dan helpful:`;
     } else {
-      prompt += `Pertanyaan user: ${userMessage}
+      // If countSummary is provided, use simplified prompt for COUNT results
+      if (countSummary && countSummary.type === 'count') {
+        prompt += `Pertanyaan user: ${userMessage}
+
+✅ DATA DITEMUKAN DI DATABASE:
+Total/Jumlah: ${countSummary.value}
+
+INSTRUKSI PENTING:
+1. Angka ${countSummary.value} adalah hasil COUNT dari database - ini adalah JAWABAN YANG VALID
+2. WAJIB jawab dengan angka ${countSummary.value}
+3. JANGAN bilang "data tidak ditemukan" - data sudah ada!
+4. JANGAN sebutkan nama tabel, database, atau detail teknis
+5. Format jawaban dengan natural, contoh: "Total observation card adalah ${countSummary.value}"
+
+Jawab sekarang dengan angka ${countSummary.value}:`;
+      } else {
+        // For non-COUNT results, use original JSON format
+        prompt += `Pertanyaan user: ${userMessage}
 
 Data yang saya temukan untuk menjawab pertanyaan Anda:
 ${JSON.stringify(dbResults, null, 2)}
 
 Instruksi:
 1. PENTING: JANGAN sebutkan sumber teknis data (nama tabel, database, schema, SQL query, dll)
-2. JANGAN PERNAH menambahkan emoji atau simbol debug info seperti 📊 Datasource, 🔍 SQL Query, 🗺️ Mapping Info
-3. JANGAN mengarang nama tabel, database, atau query yang tidak ada (seperti "HR_Karyawan", "HRDatabase", dll)
+2. ⚠️ DILARANG KERAS: JANGAN PERNAH menambahkan emoji atau section dengan judul:
+   - 📊 Datasource / 📊 **Datasource:**
+   - 🔍 SQL Query / 🔍 **SQL Query:**
+   - 🗺️ Mapping Info / 🗺️ **Mapping Info:**
+   - 🔧 DEBUG INFO atau apapun yang menyerupai debug info
+   - Jika Anda menambahkan section ini, itu adalah KESALAHAN FATAL
+3. ⚠️ DILARANG KERAS: JANGAN mengarang atau menyebutkan nama tabel/database yang tidak ada seperti:
+   - "observation_cards" (table yang salah)
+   - "ehs_records" (database yang salah)
+   - "HR_Karyawan" atau nama tabel lain yang tidak ada di dbResults
+   - Jika Anda menyebutkan nama tabel/database, itu adalah KESALAHAN FATAL
 4. Sistem akan menambahkan debug info secara otomatis untuk user yang authorized - JANGAN menambahkan debug info sendiri
 5. **CRITICAL - ANTI-HALLUCINATION RULE**:
    - JANGAN PERNAH mengarang atau membuat-buat nama karyawan, observation card, atau data apapun
-   - Jika data yang diminta tidak tersedia dalam dbResults, katakan dengan jujur: "Data detail tidak tersedia, apakah Anda ingin saya query ulang dengan detail lengkap?"
+   - ✅ COUNT RESULT ADALAH DATA VALID: Jika dbResults berisi COUNT(*) result dengan angka (contoh: 5350, 1075, 7), itu adalah data VALID dan WAJIB dijawab dengan angka tersebut
+   - ❌ JANGAN bilang "data tidak ditemukan" jika COUNT result sudah tersedia - jawab dengan angka yang benar!
    - HANYA gunakan data yang ADA di dbResults
-   - Jika dbResults hanya berisi COUNT atau angka, JANGAN mengarang detail nama/data
+   - Jika dbResults berisi COUNT/angka, jawab dengan angka tersebut. JANGAN mengarang detail nama/data tambahan
+   - Jika dbResults benar-benar kosong/null/error, BARU katakan: "Maaf, saya tidak menemukan data tersebut di database"
 6. Analisa data dengan lengkap dan mendalam HANYA berdasarkan data yang tersedia
 7. Berikan jawaban yang natural seolah Anda memiliki pengetahuan langsung tentang informasi ini
 8. Jika ada data dalam bentuk tabel/array, ringkas menjadi informasi yang mudah dibaca dan informatif
@@ -154,6 +186,7 @@ Instruksi:
     - JANGAN mengarang nama-nama
 
 Jawab dengan bahasa Indonesia yang natural, profesional, dan informatif:`;
+      }
     }
   } else {
     // Jika tidak ada data dari database
@@ -162,14 +195,34 @@ Jawab dengan bahasa Indonesia yang natural, profesional, dan informatif:`;
 
 **MODE INTERNAL - TIDAK ADA DATA DARI DATABASE**
 
-CRITICAL INSTRUCTIONS:
+⚠️ CRITICAL INSTRUCTIONS - ANTI-HALLUCINATION:
 1. Data TIDAK DITEMUKAN di database untuk pertanyaan ini
-2. JANGAN MENGARANG atau membuat-buat data
-3. Katakan dengan jujur: "Maaf, saya tidak menemukan data tersebut di database internal perusahaan"
-4. Jika pertanyaan tidak terkait database (seperti pertanyaan umum), jawab dengan pengetahuanmu sebagai AI
-5. Jika pertanyaan merujuk ke percakapan sebelumnya, gunakan konteks conversation history
+2. ⚠️ DILARANG KERAS: JANGAN MENGARANG atau membuat-buat data, angka, nama, atau informasi apapun
+3. ⚠️ DILARANG KERAS: JANGAN menambahkan debug info dengan emoji seperti:
+   - 📊 Datasource / 📊 **Datasource:**
+   - 🔍 SQL Query / 🔍 **SQL Query:**
+   - 🗺️ Mapping Info / 🗺️ **Mapping Info:**
+   - Jika Anda menambahkan ini, itu adalah KESALAHAN FATAL
+4. ⚠️ DILARANG KERAS: JANGAN menyebutkan nama tabel, database, atau detail teknis apapun seperti:
+   - Nama tabel (RecordOBCard, employees, observation_cards, dll)
+   - Nama database (global_dashboard, ehs_records, dll)
+   - SQL query apapun
+   - Jika Anda menyebutkan ini, itu adalah KESALAHAN FATAL
+5. WAJIB: Katakan dengan jujur dan sederhana: "Maaf, saya tidak menemukan data tersebut di database. Sepertinya ada masalah koneksi database atau data belum tersedia."
+6. Jika pertanyaan tidak terkait database (seperti pertanyaan umum AI, matematika, pengetahuan umum), jawab dengan pengetahuanmu sebagai AI
+7. Jika pertanyaan merujuk ke percakapan sebelumnya, gunakan konteks conversation history
 
-Jawab dengan jujur dan profesional:`;
+FORMAT JAWABAN YANG BENAR (contoh):
+- "Maaf, saya tidak menemukan data tersebut di database. Sepertinya ada masalah koneksi atau data belum tersedia."
+- "Maaf, data tidak dapat diakses saat ini. Silakan coba lagi nanti atau hubungi administrator."
+
+FORMAT JAWABAN YANG SALAH (JANGAN GUNAKAN):
+- "Berdasarkan data dari tabel observation_cards..." ❌ SALAH - mengarang nama tabel
+- "📊 Datasource: Table xyz" ❌ SALAH - menambah debug info
+- "Ada 50 karyawan di departemen IT" ❌ SALAH - mengarang angka
+- "Database ehs_records..." ❌ SALAH - mengarang nama database
+
+Jawab dengan jujur, sederhana, dan profesional:`;
     } else {
       // Mode external
       prompt += `Pertanyaan user: ${userMessage}
