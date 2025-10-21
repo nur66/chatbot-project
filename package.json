@@ -5,7 +5,9 @@
   "type": "module",
   "main": "app.js",
   "scripts": {
-    "start": "node app.js"
+    "start": "node app.js",
+    "restart": "bash restart.sh",
+    "stop": "killall -9 node 2>/dev/null || pkill -9 node 2>/dev/null || true"
   },
   "keywords": [],
   "author": "",
@@ -15,6 +17,7 @@
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "mssql": "^12.0.0",
-    "openai": "^6.2.0"
+    "openai": "^6.2.0",
+    "xlsx": "^0.18.5"
   }
 }

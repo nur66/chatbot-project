@@ -24,6 +24,10 @@ import {
   detectFollowupQuestion,
   buildContextAwareQuery
 } from "./contextPatterns.js";
+import {
+  generateExcelFromQuery,
+  formatExcelFilename
+} from "./excelExporter.js";
 
 dotenv.config();
 
@@ -1144,6 +1148,83 @@ app.post("/api/chat", async (req, res) => {
     console.error("❌ Error:", error.message);
     console.error("❌ Stack:", error.stack);
     res.status(500).json({ error: "Maaf, terjadi kesalahan saat memproses permintaan Anda." });
+  }
+});
+
+// ============================================
+// EXCEL EXPORT ENDPOINT
+// ============================================
+app.post("/api/export/excel", async (req, res) => {
+  const { sqlQuery, filename, sessionId } = req.body;
+
+  // SECURITY: Validate required fields
+  if (!sqlQuery) {
+    return res.status(400).json({ error: "SQL query is required" });
+  }
+
+  // SECURITY: Validate session ID if provided
+  const session = sessionId || 'export_session';
+  if (!validateSessionId(session)) {
+    return res.status(400).json({
+      error: "Invalid session ID format"
+    });
+  }
+
+  // SECURITY: Rate limiting (10 exports per minute per session)
+  const rateLimit = checkRateLimit(`export_${session}`, 10, 60000);
+  if (!rateLimit.allowed) {
+    const resetTime = new Date(rateLimit.resetAt).toLocaleTimeString();
+    return res.status(429).json({
+      error: `Export rate limit exceeded. Please try again after ${resetTime}.`,
+      retryAfter: Math.ceil((rateLimit.resetAt - Date.now()) / 1000)
+    });
+  }
+
+  // SECURITY: Validate SQL query
+  const validation = validateSQLQuery(sqlQuery);
+  if (!validation.isValid) {
+    console.error(`❌ Excel Export - SQL Validation Failed: ${validation.error}`);
+    return res.status(400).json({
+      error: "Invalid or potentially malicious SQL query",
+      details: validation.error
+    });
+  }
+
+  try {
+    console.log(`📊 [EXPORT] Generating Excel for session: ${session}`);
+    console.log(`📊 [EXPORT] SQL Query: ${sqlQuery}`);
+
+    // Generate Excel from query
+    const excelBuffer = await generateExcelFromQuery(sqlQuery, 'Data');
+
+    // Format filename with timestamp
+    const baseFilename = filename || 'export';
+    const formattedFilename = formatExcelFilename(baseFilename);
+
+    // Set headers for file download
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${formattedFilename}"`);
+    res.setHeader('Content-Length', excelBuffer.length);
+
+    console.log(`✅ [EXPORT] Excel generated: ${formattedFilename} (${excelBuffer.length} bytes)`);
+
+    // Send the Excel file
+    res.send(excelBuffer);
+
+  } catch (error) {
+    console.error("❌ [EXPORT] Error generating Excel:", error.message);
+
+    // Check if it's a "no data" error
+    if (error.message.includes('No data found')) {
+      return res.status(404).json({
+        error: "No data found for the provided query"
+      });
+    }
+
+    res.status(500).json({
+      error: "Failed to generate Excel file",
+      details: error.message
+    });
   }
 });
 
